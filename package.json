@@ -1,0 +1,65 @@
+{
+  "name": "compartilha-tela",
+  "productName": "Compartilha Tela",
+  "version": "2.0.0",
+  "description": "Compartilhe a tela com até 10 amigos pelo navegador (WebRTC), direto do seu PC.",
+  "main": "desktop/main.js",
+  "scripts": {
+    "app": "electron .",
+    "servidor": "node server.js",
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "io.github.morc3go.compartilhatela",
+    "productName": "Compartilha Tela",
+    "files": [
+      "server.js",
+      "public/**/*",
+      "desktop/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icone.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "CompartilhaTela-Instalador-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "CompartilhaTela-Portatil-${version}.${ext}"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icone.png",
+      "identity": null,
+      "artifactName": "CompartilhaTela-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icone.png",
+      "category": "Network",
+      "artifactName": "CompartilhaTela-${version}.${ext}"
+    }
+  }
+}

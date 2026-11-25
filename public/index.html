@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compartilha Tela</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='2' y='4' width='20' height='13' rx='2' fill='%233d63dd'/><rect x='8' y='19' width='8' height='2' rx='1' fill='%233d63dd'/></svg>">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<main>
+  <!-- Entrada -->
+  <section id="tela-entrada" class="entrada">
+    <h1>Compartilha Tela</h1>
+    <p class="sub">Entre na sala e compartilhe sua tela com os amigos. Todo mundo pode compartilhar ao mesmo tempo.</p>
+    <form id="form-entrada" class="cartao">
+      <label>Seu nome
+        <input type="text" id="campo-nome" maxlength="30" required autocomplete="nickname" placeholder="Como os outros vão te ver">
+      </label>
+      <label>Sala
+        <input type="text" id="campo-sala" maxlength="40" placeholder="geral">
+      </label>
+      <label id="rotulo-senha" class="oculto">Senha
+        <input type="password" id="campo-senha" autocomplete="current-password">
+      </label>
+      <button type="submit">Entrar na sala</button>
+      <div id="erro-entrada" class="erro oculto"></div>
+    </form>
+    <p id="aviso-seguro" class="aviso-seguro oculto">
+      Esta página não está em HTTPS, então o navegador não vai deixar você compartilhar a tela
+      (só assistir). Use o link HTTPS do túnel — veja o README.
+    </p>
+  </section>
+
+  <!-- Sala -->
+  <section id="tela-sala" class="oculto">
+    <header class="topo">
+      <div>
+        <h1 class="titulo-sala">Sala <span id="txt-sala"></span> <span class="lotacao" id="txt-lotacao"></span></h1>
+        <div id="lista-pessoas" class="pessoas"></div>
+      </div>
+      <div class="acoes">
+        <button class="sec" id="btn-copiar">Copiar link</button>
+        <button id="btn-compartilhar">Compartilhar minha tela</button>
+        <button class="sec" id="btn-sair">Sair</button>
+      </div>
+    </header>
+    <div class="opcoes">
+      <label class="linha-op">Qualidade
+        <select id="sel-qualidade"></select>
+      </label>
+      <label class="check"><input type="checkbox" id="com-audio"> Incluir áudio (Chrome e Edge)</label>
+      <span class="info-envio" id="info-envio"></span>
+    </div>
+    <div id="aviso-conexao" class="aviso-seguro oculto">Conexão com o servidor caiu. Tentando reconectar…</div>
+    <div id="grade" class="grade"></div>
+    <div id="vazio" class="vazio">Ninguém está compartilhando agora. Clique em <b>Compartilhar minha tela</b> ou espere alguém começar.</div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

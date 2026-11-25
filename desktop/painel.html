@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Compartilha Tela</title>
+<style>
+  :root {
+    --fundo: #f4f5f7; --cartao: #ffffff; --texto: #1b1e24; --suave: #5d6573;
+    --borda: #dde1e7; --destaque: #3d63dd; --destaque-texto: #fff; --perigo: #d4413b; --ok: #1f9d55; --alerta: #c27c0e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fundo: #111318; --cartao: #1a1d24; --texto: #e8eaee; --suave: #9aa2b1;
+      --borda: #2b303a; --destaque: #6d8cf0; --destaque-texto: #0e1014; --perigo: #ef6a63; --ok: #46c37b; --alerta: #e2a43a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--fundo); color: var(--texto); }
+  main { padding: 20px; display: grid; gap: 14px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--suave); margin: 0 0 10px; }
+  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 16px; }
+  .status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .ponto { width: 10px; height: 10px; border-radius: 50%; background: var(--suave); flex: none; }
+  .ponto.ok { background: var(--ok); }
+  .ponto.espera { background: var(--alerta); animation: pulsar 1.2s infinite; }
+  .ponto.erro { background: var(--perigo); }
+  @keyframes pulsar { 50% { opacity: .3; } }
+  .link { font: 600 14px/1.4 ui-monospace, monospace; word-break: break-all; margin: 10px 0 12px; padding: 10px;
+    border-radius: 8px; background: var(--fundo); border: 1px solid var(--borda); user-select: all; }
+  .linha { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .linha input { flex: 1; min-width: 0; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 9px 14px;
+    background: var(--destaque); color: var(--destaque-texto); cursor: pointer; }
+  button.sec { background: transparent; color: var(--texto); border: 1px solid var(--borda); }
+  button:disabled { opacity: .5; cursor: default; }
+  input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--borda); background: var(--fundo); color: var(--texto); }
+  .suave { color: var(--suave); font-size: 13px; margin: 8px 0 0; }
+  .erro { color: var(--perigo); }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  li .ao-vivo { color: var(--perigo); }
+  a { color: var(--destaque); }
+  .oculto { display: none !important; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Compartilha Tela</h1>
+
+  <section class="cartao">
+    <h2>Link para os amigos</h2>
+    <div class="status"><span class="ponto" id="ponto-tunel"></span><span id="txt-tunel">Iniciando…</span></div>
+    <div class="link oculto" id="txt-link"></div>
+    <div class="linha">
+      <button id="btn-copiar" disabled>Copiar link</button>
+      <button class="sec" id="btn-abrir" disabled>Abrir a sala no meu navegador</button>
+    </div>
+    <p class="suave">O link muda toda vez que o app é aberto. Mande o novo para os amigos.</p>
+    <p class="suave"><a href="#" id="btn-reiniciar">Reiniciar túnel</a></p>
+  </section>
+
+  <section class="cartao">
+    <h2>Na sala agora</h2>
+    <ul id="lista"></ul>
+  </section>
+
+  <section class="cartao">
+    <h2>Configurações</h2>
+    <label for="campo-sala">Nome da sala</label>
+    <div class="linha">
+      <input id="campo-sala" maxlength="40" placeholder="geral">
+      <button class="sec" id="btn-sala">Salvar</button>
+    </div>
+    <p class="suave">Entra no link copiado. Os amigos podem mudar de sala na tela de entrada.</p>
+    <label for="campo-senha" style="margin-top:14px">Senha de acesso (opcional)</label>
+    <div class="linha">
+      <input id="campo-senha" type="password" maxlength="100" placeholder="Sem senha">
+      <button class="sec" id="btn-senha">Salvar</button>
+    </div>
+    <p class="suave">Qualquer pessoa com o link entra. Com senha, só quem souber.</p>
+  </section>
+
+  <p class="suave" id="txt-rodape"></p>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const mostrar = (el, sim) => el.classList.toggle("oculto", !sim);
+
+function desenhar(e) {
+  const t = e.tunel;
+  const ponto = $("ponto-tunel");
+  let texto = "", classe = "espera";
+  if (e.erroServidor) { texto = "Servidor não iniciou: " + e.erroServidor; classe = "erro"; }
+  else if (t.fase === "baixando") texto = "Baixando o cloudflared (só na primeira vez)… " + (t.progresso ?? 0) + "%";
+  else if (t.fase === "conectando") texto = "Criando o link HTTPS…";
+  else if (t.fase === "online") { texto = "Online"; classe = "ok"; }
+  else if (t.fase === "erro") { texto = t.erro; classe = "erro"; }
+  else texto = "Iniciando…";
+  ponto.className = "ponto " + classe;
+  $("txt-tunel").textContent = texto;
+
+  const online = t.fase === "online";
+  const sala = (e.sala || "").trim();
+  const sufixo = sala && sala !== "geral" ? "/?sala=" + encodeURIComponent(sala) : "/";
+  $("txt-link").textContent = online ? t.url + sufixo : "";
+  mostrar($("txt-link"), online);
+  $("btn-copiar").disabled = !online;
+  $("btn-abrir").disabled = !e.portaLocal;
+
+  const lista = $("lista");
+  lista.replaceChildren();
+  const pessoas = e.salas.flatMap((s) => s.pessoas.map((p) => ({ ...p, sala: s.sala })));
+  if (!pessoas.length) {
+    const li = document.createElement("li");
+    li.className = "suave";
+    li.textContent = "Ninguém ainda.";
+    lista.appendChild(li);
+  }
+  for (const p of pessoas) {
+    const li = document.createElement("li");
+    li.textContent = p.nome + (e.salas.length > 1 ? " · sala " + p.sala : "");
+    if (p.compartilhando) {
+      const s = document.createElement("span");
+      s.className = "ao-vivo";
+      s.textContent = " ● compartilhando";
+      li.appendChild(s);
+    }
+    lista.appendChild(li);
+  }
+
+  if (document.activeElement !== $("campo-senha")) $("campo-senha").value = e.senha || "";
+  if (document.activeElement !== $("campo-sala")) $("campo-sala").value = e.sala || "";
+  $("txt-rodape").textContent = (e.portaLocal ? "Servidor local na porta " + e.portaLocal + " · " : "") + "versão " + e.versao +
+    " · fechar esta janela desliga tudo.";
+}
+
+$("btn-copiar").addEventListener("click", async () => {
+  if (await window.app.copiarLink()) {
+    $("btn-copiar").textContent = "Copiado!";
+    setTimeout(() => ($("btn-copiar").textContent = "Copiar link"), 1500);
+  }
+});
+$("btn-abrir").addEventListener("click", () => window.app.abrirSala());
+$("btn-reiniciar").addEventListener("click", (ev) => { ev.preventDefault(); window.app.reiniciarTunel(); });
+$("btn-senha").addEventListener("click", async () => {
+  await window.app.definirSenha($("campo-senha").value);
+  $("btn-senha").textContent = "Salvo!";
+  setTimeout(() => ($("btn-senha").textContent = "Salvar"), 1500);
+});
+$("btn-sala").addEventListener("click", async () => {
+  await window.app.definirSala($("campo-sala").value);
+  $("btn-sala").textContent = "Salvo!";
+  setTimeout(() => ($("btn-sala").textContent = "Salvar"), 1500);
+});
+
+window.app.aoMudarEstado(desenhar);
+window.app.obterEstado().then(desenhar);
+</script>
+</body>
+</html>
