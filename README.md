@@ -58,9 +58,12 @@ que o app é aberto.
 
 ### Na sala
 
-- **Qualidade**: *Equilibrado* (padrão: até 1440p, 60 fps), *Jogos e vídeos* (1080p, 60 fps,
-  prioriza fluidez), *Texto nítido* (resolução nativa do monitor, 30 fps, prioriza nitidez) ou
-  *Internet fraca* (720p, 30 fps). Pode trocar durante o compartilhamento.
+- **Qualidade**: *Full HD* (padrão: 1080p, 60 fps), *Quad HD* (1440p, 60 fps), *4K* (2160p,
+  60 fps), *Fluidez máxima* (jogos rápidos: mantém os 60 fps e baixa a resolução se precisar),
+  *Texto nítido* (resolução do monitor, 30 fps) ou *Internet fraca* (720p, 30 fps). Em Full HD,
+  Quad HD e 4K a resolução fica travada: faltando banda ou processador, cai o fps, não a
+  resolução. Quad HD e 4K só saem se o monitor de quem compartilha tiver essa resolução.
+  Cada tela mostra a resolução e o fps que estão chegando de verdade (ex.: "1080p · 60 fps").
 - **Seu upload**: informe a velocidade de **upload** da sua internet (em [fast.com](https://fast.com),
   clique em "Mais informações"). O app usa 80% dela para a tela. Quanto maior, mais nítida sua
   tela chega para os outros. O padrão é 20 Mbps.
@@ -91,8 +94,9 @@ que o app é aberto.
 Cada pessoa se conecta direto com cada outra, então quem compartilha envia uma cópia da tela
 para cada pessoa que está assistindo. Para isso caber no seu upload:
 
-- o app divide 80% do upload informado entre quem está assistindo, com teto de 8 Mbps por
-  pessoa (10 no *Equilibrado*, 12 no *Jogos e vídeos*). Com 20 Mbps de upload e 9 pessoas assistindo, cada uma recebe
+- o app divide 80% do upload informado entre quem está assistindo, com teto por pessoa de
+  12 Mbps no Full HD, 20 no Quad HD e 40 no 4K. Se o que sobra por pessoa for pouco para a
+  qualidade escolhida (Full HD pede uns 4 Mbps; 4K, uns 15), a sala avisa. Com 20 Mbps de upload e 9 pessoas assistindo, cada uma recebe
   até 1,8 Mbps; com 100 Mbps, até 8 Mbps cada;
 - a contagem aparece na sala ("Assistindo você: 9 pessoas direto · até 1,8 Mbps cada");
 - quem pausa uma tela deixa de contar nessa divisão;

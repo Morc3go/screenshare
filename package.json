@@ -1,7 +1,7 @@
 {
   "name": "compartilha-tela",
   "productName": "Compartilha Tela",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Compartilhe a tela com até 10 amigos pelo navegador (WebRTC), direto do seu PC.",
   "main": "desktop/main.js",
   "scripts": {

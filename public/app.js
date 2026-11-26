@@ -28,20 +28,26 @@ const FORCAR_SERVIDOR = new URLSearchParams(location.search).has("so_servidor");
 // O fps de cada modo é o máximo pedido à captura e ao codificador. H.264 vem primeiro nos modos
 // fluidos porque quase toda placa de vídeo o codifica por hardware: com VP9 (só por software) em
 // resolução alta, o processador não dá conta e o próprio navegador derruba o fps.
+// recomendado: bitrate por pessoa abaixo do qual a resolução escolhida começa a ficar ruim.
+// Full HD, 1440p e 4K usam "maintain-resolution": faltando banda ou CPU, cai o fps e a resolução
+// fica, que é o que se espera ao escolher uma resolução. "Fluidez máxima" faz o contrário.
+// 4K e 1440p só saem se o monitor tiver essa resolução (a captura não aumenta a imagem).
 const QUALIDADES = {
-  equilibrado: { nome: "Equilibrado (até 1440p, 60 fps)",   altura: 1440, fps: 60, dica: "motion", maximo: 10e6, gravacao: 5e6,   codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "balanced" },
-  movimento:   { nome: "Jogos e vídeos (1080p, 60 fps)",     altura: 1080, fps: 60, dica: "motion", maximo: 12e6, gravacao: 6e6,   codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "maintain-framerate" },
-  texto:       { nome: "Texto nítido (nativa, 30 fps)",      altura: null, fps: 30, dica: "detail", maximo: 8e6,  gravacao: 4e6,   codecs: ["VP9", "AV1", "H264", "VP8"], degradacao: "maintain-resolution" },
-  leve:        { nome: "Internet fraca (720p, 30 fps)",      altura: 720,  fps: 30, dica: "motion", maximo: 1.5e6, gravacao: 1e6,  codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "balanced", orcamentoMax: 4e6 },
+  fullhd:      { nome: "Full HD (1080p, 60 fps)",               altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 4e6,  gravacao: 8e6,  codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "maintain-resolution" },
+  equilibrado: { nome: "Quad HD (1440p, 60 fps)",               altura: 1440, fps: 60, dica: "motion", maximo: 20e6, recomendado: 7e6,  gravacao: 12e6, codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "maintain-resolution" },
+  uhd:         { nome: "4K (2160p, 60 fps)",                    altura: 2160, fps: 60, dica: "motion", maximo: 40e6, recomendado: 15e6, gravacao: 20e6, codecs: ["H264", "AV1", "VP9", "VP8"], degradacao: "maintain-resolution" },
+  movimento:   { nome: "Fluidez máxima (jogos rápidos, 60 fps)", altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 3e6,  gravacao: 8e6,  codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "maintain-framerate" },
+  texto:       { nome: "Texto nítido (resolução do monitor, 30 fps)", altura: null, fps: 30, dica: "detail", maximo: 12e6, recomendado: 3e6, gravacao: 6e6, codecs: ["VP9", "AV1", "H264", "VP8"], degradacao: "maintain-resolution" },
+  leve:        { nome: "Internet fraca (720p, 30 fps)",         altura: 720,  fps: 30, dica: "motion", maximo: 1.5e6, recomendado: 0,   gravacao: 1e6,  codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "balanced", orcamentoMax: 4e6 },
 };
-const QUALIDADE_PADRAO = "equilibrado";
+const QUALIDADE_PADRAO = "fullhd";
 // Upload que a pessoa diz ter; 80% dele vai para a tela, o resto fica para o resto da internet.
-const UPLOADS_MBPS = [5, 10, 20, 50, 100, 300];
+const UPLOADS_MBPS = [5, 10, 20, 50, 100, 300, 500, 1000];
 const UPLOAD_PADRAO_MBPS = 20;
 const FRACAO_DO_UPLOAD = 0.8;
 // O Chrome começa a transmitir em ~300 kbps e sobe devagar, deixando a tela borrada nos
 // primeiros segundos. Esta dica no SDP faz ele começar já num bitrate decente.
-const BITRATE_INICIAL_KBPS = 2500;
+const BITRATE_INICIAL_KBPS = 4000;
 const PARAMETROS_OPUS = { stereo: 1, "sprop-stereo": 1, maxaveragebitrate: 128000, useinbandfec: 1 };
 
 // Restrições do áudio capturado. Os filtros de chamada de voz (cancelar eco, tirar ruído,
@@ -112,8 +118,46 @@ function orcamentoUpload() {
 
 function restricoesDaTela(q) {
   const video = { frameRate: { ideal: q.fps, max: q.fps } };
-  if (q.altura) video.height = { max: q.altura };
+  // ideal = pede a resolução cheia (sem isso alguns navegadores entregam menos); max = não passa dela.
+  if (q.altura) video.height = { ideal: q.altura, max: q.altura };
   return video;
+}
+
+function nomeDaResolucao(altura) {
+  if (!altura) return "";
+  if (altura >= 2000) return "4K";
+  if (altura >= 1400) return "1440p";
+  if (altura >= 1000) return "1080p";
+  if (altura >= 700) return "720p";
+  return `${altura}p`;
+}
+function textoDeQualidade(altura, fps) {
+  const res = nomeDaResolucao(altura);
+  return res ? res + (fps ? ` · ${Math.round(fps)} fps` : "") : "";
+}
+
+// A cada 2 s, lê a resolução e o fps que realmente estão chegando (ou saindo, na minha tela),
+// para mostrar na legenda de cada tela.
+async function medirQualidadeRecebida() {
+  let mudou = false;
+  for (const [id, par] of estado.pares) {
+    let texto = "";
+    if (par.relay?.url) {
+      const v = document.querySelector(`[data-chave="${CSS.escape(id)}"] video`);
+      texto = textoDeQualidade(v?.videoHeight);
+    } else if (par.compartilhando && par.pc.connectionState === "connected") {
+      try {
+        (await par.pc.getStats()).forEach((x) => {
+          if (x.type === "inbound-rtp" && x.kind === "video" && x.frameHeight) texto = textoDeQualidade(x.frameHeight, x.framesPerSecond);
+        });
+      } catch { /* conexão fechando */ }
+    }
+    if (par.qualidadeRecebida !== texto) { par.qualidadeRecebida = texto; mudou = true; }
+  }
+  const minha = estado.minhaTela?.getVideoTracks()[0]?.getSettings();
+  const textoMinha = minha ? textoDeQualidade(minha.height, minha.frameRate) : "";
+  if (estado.qualidadeEnviada !== textoMinha) { estado.qualidadeEnviada = textoMinha; mudou = true; }
+  if (mudou) desenharBlocos();
 }
 
 // Ajusta o SDP enviado. Os parâmetros de formato (fmtp) são lidos pelo navegador do OUTRO lado
@@ -513,7 +557,11 @@ async function ajustarQualidade() {
   const partes = [];
   if (n) partes.push(`${n} ${n === 1 ? "pessoa" : "pessoas"} direto · até ${mbps(porPessoa)} cada`);
   if (viaServidor) partes.push(`${viaServidor} via servidor`);
-  info.textContent = partes.length ? "Assistindo você: " + partes.join(" · ") : "Ninguém assistindo sua tela ainda";
+  let texto = partes.length ? "Assistindo você: " + partes.join(" · ") : "Ninguém assistindo sua tela ainda";
+  if (n && porPessoa < q.recomendado) {
+    texto += ` — pouco para ${q.nome.split(" (")[0]} (ideal: ${mbps(q.recomendado)} por pessoa). Se sua internet aguentar, aumente "Seu upload"; senão, use uma qualidade menor.`;
+  }
+  info.textContent = texto;
 }
 
 async function aplicarQualidadeNaFaixa() {
@@ -948,6 +996,12 @@ function atualizarBloco(bloco, d) {
   const nome = Object.assign(document.createElement("span"), { className: "nome", textContent: d.rotulo });
   const filhos = [avatar(d.nomeAvatar), nome];
   if (d.selo) filhos.push(Object.assign(document.createElement("span"), { className: "selo " + d.selo.classe, textContent: d.selo.texto, title: d.selo.dica || "" }));
+  if (d.resolucao && !d.sobreposicao) {
+    filhos.push(Object.assign(document.createElement("span"), {
+      className: "selo resolucao", textContent: d.resolucao,
+      title: d.eu ? "Resolução e fps que você está capturando" : "Resolução e fps que estão chegando para você agora",
+    }));
+  }
   // Diz se a tela tem som, para ninguém ficar procurando volume numa tela que foi sem áudio.
   const selo = document.createElement("span");
   selo.className = "selo som" + (d.audio ? "" : " sem");
@@ -979,7 +1033,7 @@ function atualizarBloco(bloco, d) {
 }
 
 function descreverTela(par) {
-  const base = { rotulo: par.nome, nomeAvatar: par.nome, eu: false, pausado: par.euPausei, audio: par.temAudio };
+  const base = { rotulo: par.nome, nomeAvatar: par.nome, eu: false, pausado: par.euPausei, audio: par.temAudio, resolucao: par.qualidadeRecebida };
   if (par.euPausei) {
     return { ...base, sobreposicao: { titulo: "Pausado", texto: "Clique para voltar a assistir" } };
   }
@@ -1001,6 +1055,7 @@ function desenharBlocos() {
   if (estado.minhaTela) {
     desejados.set("eu", { rotulo: "Sua tela", nomeAvatar: estado.nome, fluxo: estado.minhaTela, eu: true,
       audio: estado.minhaTela.getAudioTracks().length > 0,
+      resolucao: estado.qualidadeEnviada,
       selo: { classe: "vivo", texto: "AO VIVO" } });
   }
   for (const [id, par] of estado.pares) if (par.compartilhando) desejados.set(id, descreverTela(par));
@@ -1033,7 +1088,7 @@ $("sel-qualidade").addEventListener("change", () => { gravarLocal("qualidade", $
 for (const mb of UPLOADS_MBPS) {
   const op = document.createElement("option");
   op.value = String(mb);
-  op.textContent = mb >= 300 ? "300+ Mbps" : `${mb} Mbps`;
+  op.textContent = mb >= 1000 ? "1 Gbps" : `${mb} Mbps`;
   $("sel-upload").appendChild(op);
 }
 $("sel-upload").value = UPLOADS_MBPS.includes(Number(lerLocal("upload"))) ? lerLocal("upload") : String(UPLOAD_PADRAO_MBPS);
@@ -1062,6 +1117,7 @@ $("btn-copiar").addEventListener("click", async () => {
 });
 window.addEventListener("beforeunload", () => { estado.saindo = true; estado.ws?.close(); });
 setInterval(verificarConexoes, 2000);
+setInterval(medirQualidadeRecebida, 2000);
 setInterval(atualizarMedidores, 150);
 $("btn-recompartilhar").addEventListener("click", recompartilharComSom);
 $("btn-fechar-aviso-som").addEventListener("click", () => mostrarAvisoSom(null));
