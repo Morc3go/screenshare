@@ -25,12 +25,16 @@ const FORCAR_SERVIDOR = new URLSearchParams(location.search).has("so_servidor");
 // codecs: ordem de preferência. VP9 tem modo de conteúdo de tela e deixa texto bem mais nítido
 //   que VP8 no mesmo bitrate; H.264 costuma ter codificador por hardware, bom para 60 fps.
 // degradacao: o que sacrificar quando falta banda/CPU.
+// O fps de cada modo é o máximo pedido à captura e ao codificador. H.264 vem primeiro nos modos
+// fluidos porque quase toda placa de vídeo o codifica por hardware: com VP9 (só por software) em
+// resolução alta, o processador não dá conta e o próprio navegador derruba o fps.
 const QUALIDADES = {
-  texto:       { nome: "Texto nítido (código, documentos)", altura: null, fps: 15, dica: "detail", maximo: 8e6,  gravacao: 4e6,   codecs: ["VP9", "AV1", "H264", "VP8"], degradacao: "maintain-resolution" },
-  equilibrado: { nome: "Equilibrado",                       altura: 1440, fps: 30, dica: "detail", maximo: 8e6,  gravacao: 4e6,   codecs: ["VP9", "H264", "AV1", "VP8"], degradacao: "balanced" },
-  movimento:   { nome: "Vídeos e jogos (60 fps)",           altura: 1080, fps: 60, dica: "motion", maximo: 10e6, gravacao: 5e6,   codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "maintain-framerate" },
-  leve:        { nome: "Internet fraca",                    altura: 720,  fps: 10, dica: "detail", maximo: 1e6,  gravacao: 0.8e6, codecs: ["VP9", "VP8", "H264", "AV1"], degradacao: "maintain-resolution", orcamentoMax: 3e6 },
+  equilibrado: { nome: "Equilibrado (até 1440p, 60 fps)",   altura: 1440, fps: 60, dica: "motion", maximo: 10e6, gravacao: 5e6,   codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "balanced" },
+  movimento:   { nome: "Jogos e vídeos (1080p, 60 fps)",     altura: 1080, fps: 60, dica: "motion", maximo: 12e6, gravacao: 6e6,   codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "maintain-framerate" },
+  texto:       { nome: "Texto nítido (nativa, 30 fps)",      altura: null, fps: 30, dica: "detail", maximo: 8e6,  gravacao: 4e6,   codecs: ["VP9", "AV1", "H264", "VP8"], degradacao: "maintain-resolution" },
+  leve:        { nome: "Internet fraca (720p, 30 fps)",      altura: 720,  fps: 30, dica: "motion", maximo: 1.5e6, gravacao: 1e6,  codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "balanced", orcamentoMax: 4e6 },
 };
+const QUALIDADE_PADRAO = "equilibrado";
 // Upload que a pessoa diz ter; 80% dele vai para a tela, o resto fica para o resto da internet.
 const UPLOADS_MBPS = [5, 10, 20, 50, 100, 300];
 const UPLOAD_PADRAO_MBPS = 20;
@@ -41,16 +45,16 @@ const BITRATE_INICIAL_KBPS = 2500;
 const PARAMETROS_OPUS = { stereo: 1, "sprop-stereo": 1, maxaveragebitrate: 128000, useinbandfec: 1 };
 
 // Restrições do áudio capturado. Os filtros de chamada de voz (cancelar eco, tirar ruído,
-// ajustar volume) cortam música e som de jogo, então vão desligados. restrictOwnAudio evita
-// capturar o som desta própria aba (as telas dos outros tocando aqui), que viraria eco.
+// ajustar volume) cortam música e som de jogo, então vão desligados.
 const AUDIO_DA_TELA = {
   echoCancellation: false,
   noiseSuppression: false,
   autoGainControl: false,
-  channelCount: 2,
-  restrictOwnAudio: true,
   suppressLocalAudioPlayback: false,
 };
+// Sem som por este tempo, com a faixa de áudio existindo, vira aviso para quem compartilha.
+const SILENCIO_SUSPEITO_MS = 20000;
+const NIVEL_MINIMO_SOM = 0.002; // RMS abaixo disso é silêncio
 const BITRATE_MINIMO = 250e3;
 const ESPERA_CONEXAO_DIRETA_MS = 7000;
 const FATIA_GRAVACAO_MS = 250;
@@ -73,7 +77,9 @@ const estado = {
   minhaTela: null,      // MediaStream da minha tela
   destaque: null,       // chave do bloco ampliado
   gravacao: null,       // plano B do meu lado: { recorder, mime, assinantes:Set, fila:Promise }
-  mudos: new Set(),     // telas que EU silenciei
+  mudos: new Set(),
+  avisoSom: null,       // null | "sem-faixa" | "silencio"
+  silencioDesde: 0,     // telas que EU silenciei
   somBloqueado: false,  // o navegador recusou tocar com som antes de um clique
   pares: new Map(),
   // id -> { pc, nome, polido, criandoOferta, ignorarOferta,
@@ -96,7 +102,7 @@ function sinal(tipo, dados, para) {
 }
 
 function qualidadeAtual() {
-  return QUALIDADES[$("sel-qualidade").value] || QUALIDADES.texto;
+  return QUALIDADES[$("sel-qualidade").value] || QUALIDADES[QUALIDADE_PADRAO];
 }
 
 function orcamentoUpload() {
@@ -674,9 +680,14 @@ async function compartilhar() {
   let tela;
   try {
     const querAudio = $("com-audio").checked;
+    // restrictOwnAudio tira do áudio do sistema o som desta aba (as telas dos outros tocando
+    // aqui), que voltaria para eles como eco. Só é pedido quando alguém está mesmo mandando som:
+    // é um recurso novo do Chrome e, se der problema em algum Windows, ao menos não afeta o caso comum.
+    const haSomDosOutros = [...estado.pares.values()].some((p) => p.compartilhando && p.temAudio);
+    const audio = querAudio ? { ...AUDIO_DA_TELA, ...(haSomDosOutros ? { restrictOwnAudio: true } : {}) } : false;
     tela = await navigator.mediaDevices.getDisplayMedia({
       video: restricoesDaTela(q),
-      audio: querAudio ? AUDIO_DA_TELA : false,
+      audio,
       // Opções do seletor do Chrome/Edge (os outros navegadores ignoram):
       systemAudio: "include",        // oferece o áudio do sistema ao escolher "Tela inteira"
       windowAudio: "system",         // e ao escolher uma janela, onde o navegador suportar
@@ -688,10 +699,11 @@ async function compartilhar() {
   }
   const faixaAudio = tela.getAudioTracks()[0];
   if (faixaAudio) faixaAudio.contentHint = "music";
-  if ($("com-audio").checked && !faixaAudio) {
-    toast("Sua tela foi sem som. Para ir com som, no Chrome ou Edge escolha \"Tela inteira\" ou uma \"Aba\" e deixe ligado \"Compartilhar áudio\". Janelas avulsas e o Firefox não mandam som.", 9000);
-  }
   estado.minhaTela = tela;
+  estado.silencioDesde = Date.now();
+  // Aviso fixo (não some sozinho) quando a tela foi sem som: o seletor do Chrome deixa
+  // "Compartilhar áudio do sistema" desligado em "Tela inteira", e é fácil não perceber.
+  mostrarAvisoSom($("com-audio").checked && !faixaAudio ? "sem-faixa" : null);
   tela.getVideoTracks()[0].contentHint = q.dica;
   // O botão "Parar compartilhamento" do próprio navegador encerra a faixa.
   tela.getVideoTracks()[0].addEventListener("ended", pararCompartilhar);
@@ -717,6 +729,7 @@ function pararCompartilhar() {
     par.elePausou = false;
   }
   if (estado.destaque === "eu") estado.destaque = null;
+  mostrarAvisoSom(null);
   sinal("estado", { compartilhando: false });
   atualizarBotaoCompartilhar();
   desenharPessoas();
@@ -734,6 +747,85 @@ function alternarPausa(id) {
 }
 
 // ---------- Som ----------
+// Medidor de nível: mostra em cada tela se o som está saindo (na minha) ou chegando (nas dos
+// outros). É o jeito de saber, na hora, se o problema é a captura ou a reprodução.
+let contextoAudio = null;
+const medidores = new WeakMap(); // MediaStreamTrack -> AnalyserNode
+
+function nivelDaFaixa(track) {
+  if (!track || track.readyState !== "live") return null;
+  try {
+    contextoAudio ??= new AudioContext();
+    if (contextoAudio.state === "suspended") contextoAudio.resume().catch(() => {});
+    let analisador = medidores.get(track);
+    if (!analisador) {
+      analisador = contextoAudio.createAnalyser();
+      analisador.fftSize = 1024;
+      contextoAudio.createMediaStreamSource(new MediaStream([track])).connect(analisador);
+      medidores.set(track, analisador);
+    }
+    const amostras = new Float32Array(analisador.fftSize);
+    analisador.getFloatTimeDomainData(amostras);
+    let soma = 0;
+    for (const a of amostras) soma += a * a;
+    return Math.sqrt(soma / amostras.length);
+  } catch {
+    return null;
+  }
+}
+
+// Faixa de áudio que está tocando num bloco (fluxo direto) ou capturada do player (via servidor).
+function faixaDeAudioDoBloco(bloco) {
+  const video = bloco.querySelector("video");
+  if (video.srcObject) return video.srcObject.getAudioTracks()[0] || null;
+  if (video.dataset.url && video.captureStream) {
+    try {
+      video.__captura ??= video.captureStream();
+      return video.__captura.getAudioTracks()[0] || null;
+    } catch { return null; }
+  }
+  return null;
+}
+
+function atualizarMedidores() {
+  for (const bloco of document.querySelectorAll(".bloco")) {
+    const barra = bloco.querySelector(".medidor");
+    if (!barra) continue;
+    const nivel = nivelDaFaixa(faixaDeAudioDoBloco(bloco));
+    // Escala logarítmica: som de jogo/música fica entre -50 e 0 dB.
+    const fracao = nivel ? Math.max(0, Math.min(1, (20 * Math.log10(nivel) + 50) / 50)) : 0;
+    barra.style.setProperty("--nivel", fracao.toFixed(2));
+  }
+  // Minha tela com faixa de áudio mas em silêncio há muito tempo: provavelmente o som do jogo
+  // está saindo por outro dispositivo, ou o volume do Windows está mudo.
+  const minhaFaixa = estado.minhaTela?.getAudioTracks()[0];
+  if (minhaFaixa) {
+    const nivel = nivelDaFaixa(minhaFaixa) ?? 0;
+    if (nivel > NIVEL_MINIMO_SOM) {
+      estado.silencioDesde = Date.now();
+      if (estado.avisoSom === "silencio") mostrarAvisoSom(null);
+    } else if (Date.now() - estado.silencioDesde > SILENCIO_SUSPEITO_MS && !estado.avisoSom) {
+      mostrarAvisoSom("silencio");
+    }
+  }
+}
+
+function mostrarAvisoSom(tipo) {
+  estado.avisoSom = tipo;
+  const el = $("aviso-som");
+  mostrar(el, Boolean(tipo));
+  if (!tipo) return;
+  $("txt-aviso-som").textContent = tipo === "sem-faixa"
+    ? "Sua tela está indo SEM SOM. Clique em \"Compartilhar de novo com som\" e, no seletor, escolha \"Tela inteira\" (ou uma aba) e LIGUE a opção \"Compartilhar áudio do sistema\" embaixo da miniatura. Janelas avulsas e o Firefox não mandam som."
+    : "Nenhum som saindo da sua tela há 20 segundos. Se era para ter som: confira se o volume do Windows não está mudo e se o jogo toca no dispositivo de saída padrão do Windows (é só dele que o navegador captura).";
+}
+
+async function recompartilharComSom() {
+  $("com-audio").checked = true;
+  gravarLocal("audio-v2", "sim");
+  pararCompartilhar();
+  await compartilhar();
+}
 // Navegadores só tocam vídeo com som depois de um clique na página. Normalmente o clique em
 // "Entrar na sala" basta; se mesmo assim recusarem, toca sem som e mostra "Ativar som".
 function tocar(video) {
@@ -790,6 +882,7 @@ function botaoIcone(nomeIcone, titulo, aoClicar) {
 }
 
 function criarBloco(chave) {
+  // (o medidor de som fica na legenda; ver atualizarBloco)
   const bloco = document.createElement("div");
   bloco.className = "bloco" + (chave === "eu" ? " minha" : "");
   bloco.dataset.chave = chave;
@@ -860,6 +953,7 @@ function atualizarBloco(bloco, d) {
   selo.className = "selo som" + (d.audio ? "" : " sem");
   selo.title = d.audio ? "Esta tela está com som" : "Esta tela foi compartilhada sem som";
   selo.appendChild(icone(d.audio ? "som" : "mudo"));
+  if (d.audio) selo.appendChild(Object.assign(document.createElement("span"), { className: "medidor" }));
   filhos.push(selo);
   legenda.replaceChildren(...filhos);
 
@@ -934,7 +1028,7 @@ for (const [chave, q] of Object.entries(QUALIDADES)) {
   op.textContent = q.nome;
   $("sel-qualidade").appendChild(op);
 }
-$("sel-qualidade").value = QUALIDADES[lerLocal("qualidade")] ? lerLocal("qualidade") : "texto";
+$("sel-qualidade").value = QUALIDADES[lerLocal("qualidade")] ? lerLocal("qualidade") : QUALIDADE_PADRAO;
 $("sel-qualidade").addEventListener("change", () => { gravarLocal("qualidade", $("sel-qualidade").value); aplicarQualidadeNaFaixa(); });
 for (const mb of UPLOADS_MBPS) {
   const op = document.createElement("option");
@@ -948,10 +1042,11 @@ $("sel-upload").addEventListener("change", () => { gravarLocal("upload", $("sel-
 $("form-entrada").addEventListener("submit", (e) => { e.preventDefault(); mostrar($("erro-entrada"), false); entrar(); });
 $("btn-compartilhar").addEventListener("click", compartilhar);
 $("btn-ativar-som").addEventListener("click", ativarSom);
-// Áudio vem ligado por padrão; a escolha fica guardada.
-$("com-audio").checked = lerLocal("audio") !== "nao";
+// Áudio vem ligado por padrão; quem desligar, fica desligado só para essa pessoa. A chave
+// "audio-v2" zera a escolha antiga (de quando o padrão era desligado), para todos voltarem com som.
+$("com-audio").checked = lerLocal("audio-v2") !== "nao";
 $("com-audio").addEventListener("change", () => {
-  gravarLocal("audio", $("com-audio").checked ? "sim" : "nao");
+  gravarLocal("audio-v2", $("com-audio").checked ? "sim" : "nao");
   if (estado.minhaTela) toast("Vale a partir do próximo compartilhamento. Pare e compartilhe de novo para mudar o som.", 4500);
 });
 $("btn-sair").addEventListener("click", sair);
@@ -967,6 +1062,9 @@ $("btn-copiar").addEventListener("click", async () => {
 });
 window.addEventListener("beforeunload", () => { estado.saindo = true; estado.ws?.close(); });
 setInterval(verificarConexoes, 2000);
+setInterval(atualizarMedidores, 150);
+$("btn-recompartilhar").addEventListener("click", recompartilharComSom);
+$("btn-fechar-aviso-som").addEventListener("click", () => mostrarAvisoSom(null));
 
 $("campo-nome").value = lerLocal("nome");
 $("campo-sala").value = new URLSearchParams(location.search).get("sala") || "";

@@ -78,10 +78,17 @@
     <label class="chave" title="Chrome e Edge: escolha Tela inteira ou Aba e deixe ligado Compartilhar áudio. No macOS, só Aba. O Firefox não manda som.">
       <input type="checkbox" id="com-audio" checked><span class="trilho"></span><span>Incluir áudio</span>
     </label>
-    <button class="btn fantasma oculto" id="btn-ativar-som" type="button"><svg><use href="#i-som"/></svg><span>Ativar som</span></button>
+    <button class="btn primario oculto" id="btn-ativar-som" type="button"><svg><use href="#i-som"/></svg><span>Ativar som</span></button>
     <span class="info-envio" id="info-envio"></span>
   </div>
 
+  <div id="aviso-som" class="aviso aviso-som oculto" role="alert">
+    <span id="txt-aviso-som"></span>
+    <div class="acoes-aviso">
+      <button class="btn primario" id="btn-recompartilhar" type="button"><svg><use href="#i-som"/></svg><span>Compartilhar de novo com som</span></button>
+      <button class="btn fantasma" id="btn-fechar-aviso-som" type="button">Agora não</button>
+    </div>
+  </div>
   <div id="aviso-conexao" class="aviso oculto">Conexão com o servidor caiu. Tentando reconectar…</div>
 
   <div id="grade" class="grade"></div>

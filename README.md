@@ -58,29 +58,32 @@ que o app é aberto.
 
 ### Na sala
 
-- **Qualidade**: *Texto nítido* (código e documentos, na resolução nativa do seu monitor),
-  *Equilibrado* (até 1440p, 30 fps), *Vídeos e jogos* (1080p, 60 fps) ou *Internet fraca*.
-  Pode trocar durante o compartilhamento.
+- **Qualidade**: *Equilibrado* (padrão: até 1440p, 60 fps), *Jogos e vídeos* (1080p, 60 fps,
+  prioriza fluidez), *Texto nítido* (resolução nativa do monitor, 30 fps, prioriza nitidez) ou
+  *Internet fraca* (720p, 30 fps). Pode trocar durante o compartilhamento.
 - **Seu upload**: informe a velocidade de **upload** da sua internet (em [fast.com](https://fast.com),
   clique em "Mais informações"). O app usa 80% dela para a tela. Quanto maior, mais nítida sua
   tela chega para os outros. O padrão é 20 Mbps.
 - **Pausar** numa tela: você para de receber essa tela, e quem compartilha para de enviar
   para você, sobrando banda para os outros.
 - **Destacar**: amplia uma tela no topo. **Tela cheia**: ocupa o monitor.
-- **Som**: vem ligado (**Incluir áudio**). Para a tela ir com som, no Chrome ou Edge escolha
-  **Tela inteira** ou uma **Aba** e deixe marcado **Compartilhar áudio** no seletor. Janelas
-  avulsas e o Firefox não mandam som; o site avisa quando a tela saiu sem som. Cada tela mostra um
-  ícone de alto-falante (com ou sem som) e tem botão para silenciar só ela. O som vai em estéreo,
-  com qualidade de música, sem os filtros de chamada de voz que cortam música e jogo.
+- **Som**: vai junto por padrão (**Incluir áudio** ligado; desligue se não quiser). No seletor do
+  Chrome ou Edge, escolha **Tela inteira** ou uma **Aba** e **ligue "Compartilhar áudio do
+  sistema"** (em "Tela inteira" essa opção vem desligada e o site não consegue ligá-la por você).
+  Se a tela sair sem som, aparece um aviso fixo com o botão **Compartilhar de novo com som**.
+  Cada tela tem um medidor de som: na sua, mostra se o som está saindo; nas dos outros, se está
+  chegando. Se sua tela estiver com som ligado mas muda por 20 s, o site avisa (volume do Windows
+  no mudo, ou o jogo tocando num dispositivo que não é o padrão do Windows).
 
 ## Qualidade da imagem
 
 - **Resolução nativa**: no modo *Texto nítido* a tela vai sem reduzir (1440p, 4K…), porque
   reduzir é o que mais borra texto.
-- **Codec VP9** (ou H.264 no modo de 60 fps): o VP9 tem um modo próprio para conteúdo de tela e
-  deixa texto bem mais nítido que o VP8 padrão no mesmo bitrate.
-- **Resolução tem prioridade**: se faltar banda ou CPU, cai a fluidez (fps), não a nitidez.
-  No modo *Vídeos e jogos* é o contrário.
+- **Codec**: H.264 nos modos de 60 fps, porque quase toda placa de vídeo o codifica por hardware
+  e o fps não cai por falta de processador; VP9 no *Texto nítido*, que tem um modo próprio para
+  conteúdo de tela e deixa letras bem mais nítidas.
+- **O que sacrificar quando falta banda ou CPU**: no *Texto nítido* cai o fps e a nitidez fica;
+  no *Jogos e vídeos* cai a resolução e os 60 fps ficam; o *Equilibrado* divide entre os dois.
 - **Começa nítido**: o navegador começa já em 2,5 Mbps, em vez de começar baixo e ir subindo.
 
 ## Como ele aguenta 10 pessoas
@@ -89,7 +92,7 @@ Cada pessoa se conecta direto com cada outra, então quem compartilha envia uma 
 para cada pessoa que está assistindo. Para isso caber no seu upload:
 
 - o app divide 80% do upload informado entre quem está assistindo, com teto de 8 Mbps por
-  pessoa (10 no modo de 60 fps). Com 20 Mbps de upload e 9 pessoas assistindo, cada uma recebe
+  pessoa (10 no *Equilibrado*, 12 no *Jogos e vídeos*). Com 20 Mbps de upload e 9 pessoas assistindo, cada uma recebe
   até 1,8 Mbps; com 100 Mbps, até 8 Mbps cada;
 - a contagem aparece na sala ("Assistindo você: 9 pessoas direto · até 1,8 Mbps cada");
 - quem pausa uma tela deixa de contar nessa divisão;

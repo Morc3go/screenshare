@@ -114,8 +114,8 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--acento-
 .info-envio { font-size: 13px; color: var(--suave); }
 
 /* ---------- Grade de telas ---------- */
-.grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 14px; }
-.grade.muitos { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+.grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 14px; }
+.grade.muitos { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
 .bloco { position: relative; background: var(--video); border-radius: var(--raio); overflow: hidden; aspect-ratio: 16/9;
   border: 1px solid var(--borda); box-shadow: var(--sombra); animation: surgir .25s ease-out; }
 .bloco.destaque { grid-column: 1 / -1; }
@@ -134,7 +134,14 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--acento-
 .selo.vivo { background: var(--ao-vivo); color: #fff; }
 .selo.som { display: inline-grid; place-items: center; padding: 2px 5px; background: rgba(255,255,255,.12); color: #fff; }
 .selo.som.sem { color: #8d96a8; }
+.selo.som { display: inline-flex; align-items: center; gap: 4px; }
 .selo.som svg { width: 14px; height: 14px; }
+/* Medidor de som: barra que enche conforme o nível (--nivel de 0 a 1). */
+.medidor { --nivel: 0; width: 28px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; position: relative; }
+.medidor::after { content: ""; position: absolute; inset: 0; transform-origin: left; transform: scaleX(var(--nivel));
+  background: linear-gradient(90deg, var(--ok), #c6f36b 70%, var(--alerta)); transition: transform .12s linear; }
+.aviso-som { display: grid; gap: 12px; border-color: rgba(255, 77, 94, .55); background: rgba(255, 77, 94, .08); font-size: 15px; }
+.acoes-aviso { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .acoes-bloco { position: absolute; right: 10px; top: 10px; z-index: 2; display: flex; gap: 6px; opacity: 0; transform: translateY(-4px);
   transition: opacity .15s, transform .15s; }
