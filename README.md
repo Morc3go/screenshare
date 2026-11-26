@@ -100,6 +100,12 @@ que o app é aberto.
   Cada tela tem um medidor de som: na sua, mostra se o som está saindo; nas dos outros, se está
   chegando. Se sua tela estiver com som ligado mas muda por 20 s, o site avisa (volume do Windows
   no mudo, ou o jogo tocando num dispositivo que não é o padrão do Windows).
+- **Câmera**: botão **Ligar câmera**. Ela aparece num quadro próprio para os outros (ao lado da
+  sua tela, se você também estiver compartilhando), em até 720p a 30 fps e sem som (o som fica
+  com a tela; a conversa, com o Discord ou o app de voz de vocês). A sua aparece espelhada só para
+  você. Funciona também no celular, que não compartilha tela mas pode ligar a câmera. A câmera
+  precisa de conexão direta: se a rede de alguém bloqueia (modo via servidor), essa pessoa vê a
+  tela mas não a câmera.
 - **Volume de cada tela**: botão de mudo e barra de volume no canto de cada tela.
 - **Tela cheia**: botão no canto ou clique duplo no vídeo. Com o mouse parado por 2,5 s, a legenda,
   os botões e o cursor somem; mexeu o mouse, voltam.
@@ -202,8 +208,8 @@ npm test
 ```
 
 Roda um Chromium de verdade com várias "pessoas" na mesma sala (a tela compartilhada é uma
-animação e o som um tom, gerados pelo teste; todo o resto é o código real) e verifica: conexão
-direta, modo via servidor, sala cheia com 10 pessoas, som (qualidade, reforço, mudo, avisos de sem
+animação, o som um tom e a câmera a câmera falsa do Chromium; todo o resto é o código real) e
+verifica: conexão direta, câmera, modo via servidor, sala cheia com 10 pessoas, som (qualidade, reforço, mudo, avisos de sem
 som), tela cheia, aba escondida, queda do servidor, upload automático, 4K, segurança (senha,
 arquivos fora do site, mensagem gigante) e celular. Ao terminar, grava as medições em
 [`docs/relatorio-de-testes.md`](docs/relatorio-de-testes.md). Para rodar só alguns:

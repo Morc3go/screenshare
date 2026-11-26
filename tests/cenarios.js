@@ -145,6 +145,66 @@ module.exports = [
   },
 
   {
+    nome: "Câmera",
+    async rodar(t) {
+      const amb = await t.ambiente();
+      const ana = await amb.pessoa("Ana");
+      const bia = await amb.pessoa("Bia");
+      const quadros = (p) => p.evaluate(() => [...document.querySelectorAll(".bloco")].map((b) => {
+        const v = b.querySelector("video");
+        return { nome: b.querySelector(".nome")?.textContent, camera: b.classList.contains("camera"), largura: v.videoWidth, altura: v.videoHeight, res: b.querySelector(".selo.resolucao")?.textContent || "" };
+      }));
+      const t0 = Date.now();
+      await ana.click("#btn-camera");
+      await esperarTelas(bia, 1, 15000);
+      t.medir("Tempo até a câmera aparecer", Date.now() - t0, "ms");
+      let q = await quadros(bia);
+      t.verificar(q.length === 1 && q[0].camera && q[0].nome === "Ana · câmera", "ligar a câmera cria um quadro 'Ana · câmera' para os outros", JSON.stringify(q.map((x) => x.nome)));
+      t.verificar(await ana.isVisible(".bloco.camera-propria"), "a própria câmera aparece (espelhada) para quem ligou");
+      t.verificar(/Desligar/.test(await ana.textContent("#btn-camera")), "o botão vira 'Desligar câmera'");
+      // tela + câmera ao mesmo tempo: dois quadros, cada um com o vídeo certo
+      await ana.click("#btn-compartilhar");
+      await esperarTelas(bia, 2, 15000);
+      await dormir(5000);
+      q = await quadros(bia);
+      const tela = q.find((x) => !x.camera), cam = q.find((x) => x.camera);
+      t.medir("Câmera recebida", `${cam.largura}×${cam.altura} (${cam.res})`);
+      t.verificar(tela && cam, "tela e câmera juntas aparecem em dois quadros", JSON.stringify(q.map((x) => x.nome)));
+      t.verificar(tela.largura !== cam.largura || tela.altura !== cam.altura, "o quadro da tela mostra a tela e o da câmera mostra a câmera (não trocados)", `tela ${tela.largura}×${tela.altura}, câmera ${cam.largura}×${cam.altura}`);
+      t.verificar(cam.altura <= 720 && cam.altura >= 360, "a câmera vai em até 720p", `${cam.altura}p`);
+      // quem entra depois também vê
+      const caio = await amb.pessoa("Caio");
+      await esperarTelas(caio, 2, 20000);
+      t.verificar(true, "quem entra depois vê a tela e a câmera");
+      // parar a tela não desliga a câmera
+      await ana.click("#btn-compartilhar");
+      await bia.waitForFunction(() => document.querySelectorAll(".bloco").length === 1 && document.querySelector(".bloco.camera"), null, { timeout: 10000 });
+      t.verificar(true, "parar a tela mantém a câmera ligada");
+      // aba escondida: a câmera também para de chegar
+      const quadrosCamera = () => bia.evaluate(async () => { let n = 0; for (const pc of window.__pcs) (await pc.getStats()).forEach((x) => { if (x.type === "inbound-rtp" && x.kind === "video") n += x.framesDecoded || 0; }); return n; });
+      await bia.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+      await dormir(7000);
+      const c1 = await quadrosCamera(); await dormir(2500); const c2 = await quadrosCamera();
+      t.verificar(c2 === c1, "com a aba escondida, a câmera também para de chegar (alivia o PC)", `${c2 - c1} quadros`);
+      await bia.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); document.dispatchEvent(new Event("visibilitychange")); });
+      await dormir(2500);
+      const c3 = await quadrosCamera(); await dormir(2000); const c4 = await quadrosCamera();
+      t.verificar(c4 > c3, "voltou para a aba: a câmera volta");
+      // desligar
+      await ana.click("#btn-camera");
+      await bia.waitForFunction(() => document.querySelectorAll(".bloco").length === 0, null, { timeout: 10000 });
+      t.verificar(true, "desligar a câmera tira o quadro dos outros");
+      // celular: não compartilha tela, mas liga a câmera
+      const cel = await amb.pessoa("Cel", { viewport: { width: 390, height: 800 }, antes: () => { delete navigator.mediaDevices.getDisplayMedia; delete MediaDevices.prototype.getDisplayMedia; } });
+      t.verificar(await cel.isVisible("#btn-camera"), "no celular o botão de câmera aparece");
+      await cel.click("#btn-camera");
+      await bia.waitForFunction(() => [...document.querySelectorAll(".bloco .nome")].some((n) => n.textContent === "Cel · câmera"), null, { timeout: 15000 });
+      await esperarTelas(bia, 1, 15000);
+      t.verificar(true, "a câmera do celular chega para os outros");
+    },
+  },
+
+  {
     nome: "Tela cheia e aba escondida",
     async rodar(t) {
       const amb = await t.ambiente();

@@ -108,6 +108,8 @@ const NIVEL_MINIMO_SOM = 0.002; // RMS abaixo disso é silêncio
 const BITRATE_MINIMO = 250e3;
 const ESPERA_CONEXAO_DIRETA_MS = 7000;
 const FATIA_GRAVACAO_MS = 250;
+// Câmera: qualidade fixa e modesta. É um rosto num quadro pequeno; o upload fica para a tela.
+const CAMERA = { largura: 1280, altura: 720, fps: 30, bitrate: 1.5e6 };
 const OCIOSO_TELA_CHEIA_MS = 2500;
 // Aba escondida por mais que isso: para de receber o VÍDEO das telas (o som continua).
 const ESPERA_ABA_ESCONDIDA_MS = 5000;
@@ -130,6 +132,7 @@ const estado = {
   ws: null,             // WebSocket de sinalização
   saindo: false,        // saída voluntária: não reconecta
   minhaTela: null,      // MediaStream da minha tela
+  minhaCamera: null,    // MediaStream da minha câmera
   destaque: null,       // chave do bloco ampliado
   gravacao: null,       // plano B do meu lado: { recorder, mime, assinantes:Set, fila:Promise }
   auto: { orcamento: AUTO.inicial, rttBase: new Map(), ultimoCorte: 0, bytesAntes: null, quandoAntes: 0 },
@@ -231,14 +234,22 @@ async function medirQualidadeRecebida() {
     if (par.relay?.url) {
       const v = document.querySelector(`[data-chave="${CSS.escape(id)}"] video`);
       texto = textoDeQualidade(v?.videoHeight);
-    } else if (par.compartilhando && par.pc.connectionState === "connected") {
+    }
+    let textoCamera = "";
+    if ((par.compartilhando || par.camera) && par.pc.connectionState === "connected") {
+      const idTela = par.fluxo?.getVideoTracks()[0]?.id;
+      const idCamera = par.fluxoCamera?.getVideoTracks()[0]?.id;
       try {
         (await par.pc.getStats()).forEach((x) => {
-          if (x.type === "inbound-rtp" && x.kind === "video" && x.frameHeight) texto = textoDeQualidade(x.frameHeight, x.framesPerSecond);
+          if (x.type !== "inbound-rtp" || x.kind !== "video" || !x.frameHeight) return;
+          const t = textoDeQualidade(x.frameHeight, x.framesPerSecond);
+          if (idCamera && x.trackIdentifier === idCamera) textoCamera = t;
+          else if (!par.relay?.url && (!idTela || x.trackIdentifier === idTela)) texto = t;
         });
       } catch { /* conexão fechando */ }
     }
     if (par.qualidadeRecebida !== texto) { par.qualidadeRecebida = texto; mudou = true; }
+    if (par.qualidadeCamera !== textoCamera) { par.qualidadeCamera = textoCamera; mudou = true; }
   }
   // Minha tela: o que o codificador está mandando de verdade (pior caso entre quem assiste direto),
   // por que está limitado, e se é a placa de vídeo que codifica.
@@ -246,11 +257,16 @@ async function medirQualidadeRecebida() {
   if (estado.minhaTela) {
     await controlarUploadAutomatico();
     let pior = null;
+    const idTela = estado.fluxoEnvio?.getVideoTracks()[0]?.id;
     for (const par of estado.pares.values()) {
       if (!par.envios.length || par.elePausou || par.pc.connectionState !== "connected") continue;
       try {
-        (await par.pc.getStats()).forEach((x) => {
+        const stats = await par.pc.getStats();
+        stats.forEach((x) => {
           if (x.type !== "outbound-rtp" || x.kind !== "video" || !x.frameHeight) return;
+          // Só o envio da tela (a câmera tem o próprio envio, com qualidade fixa).
+          const origem = x.mediaSourceId && stats.get(x.mediaSourceId);
+          if (origem && idTela && origem.trackIdentifier !== idTela) return;
           const m = { altura: x.frameHeight, fps: x.framesPerSecond || 0, limite: x.qualityLimitationReason, hw: x.powerEfficientEncoder };
           if (!pior || m.fps < pior.fps) pior = m;
         });
@@ -364,6 +380,9 @@ function criarPar(id, nome) {
   const par = {
     pc, nome, fluxo: null, compartilhando: false, euPausei: false, desdeFalha: null, relay: null,
     envios: [], elePausou: false,
+    // Câmera: chega por uma faixa separada da tela. Quem envia anuncia o id de cada fluxo
+    // (telaId/cameraId) no "estado", e é por ele que se sabe qual vídeo é qual.
+    fluxos: new Map(), telaId: null, cameraId: null, camera: false, fluxoCamera: null, enviosCamera: [],
     // Um lado precisa ceder quando os dois mandam oferta ao mesmo tempo; a ordem dos ids decide.
     polido: estado.meuId < id,
     criandoOferta: false, ignorarOferta: false,
@@ -385,9 +404,11 @@ function criarPar(id, nome) {
   // Os parâmetros de codificação só existem depois da negociação; reaplica quando ela termina.
   pc.onsignalingstatechange = () => { if (pc.signalingState === "stable") ajustarQualidade(); };
   pc.ontrack = ({ track, streams }) => {
-    par.fluxo = streams[0] || new MediaStream([track]);
+    const fluxo = streams[0] || new MediaStream([track]);
+    par.fluxos.set(fluxo.id, fluxo);
+    classificarFluxos(par);
     track.onunmute = () => desenharBlocos();
-    if (par.compartilhando) desenharBlocos();
+    desenharBlocos();
   };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "failed") pc.restartIce();
@@ -395,7 +416,20 @@ function criarPar(id, nome) {
   };
 
   if (estado.minhaTela) enviarTelaPara(par);
+  if (estado.minhaCamera) enviarCameraPara(par);
   return par;
+}
+
+// Decide qual fluxo recebido é a tela e qual é a câmera. Versões antigas da página não anunciam o
+// id da tela: aí a tela é o fluxo que não é a câmera.
+function classificarFluxos(par) {
+  par.fluxoCamera = (par.cameraId && par.fluxos.get(par.cameraId)) || null;
+  par.fluxo = (par.telaId && par.fluxos.get(par.telaId)) ||
+    [...par.fluxos.values()].reverse().find((f) => f.id !== par.cameraId) || null;
+}
+
+function enviarCameraPara(par) {
+  par.enviosCamera = estado.minhaCamera.getTracks().map((track) => ({ sender: par.pc.addTrack(track, estado.minhaCamera), track }));
 }
 
 function enviarTelaPara(par) {
@@ -455,6 +489,11 @@ async function tratarPedidoAssistir(id, ativo, video = true) {
     const mandar = ativo && estado.minhaTela && (track.kind === "audio" || video);
     try { await sender.replaceTrack(mandar ? track : null); } catch (e) { console.warn(e); }
   }
+  // A câmera não tem pausa própria; só para quando a pessoa está com a aba escondida.
+  par.eleSemVideoCamera = !video;
+  for (const { sender, track } of par.enviosCamera) {
+    try { await sender.replaceTrack(video && estado.minhaCamera ? track : null); } catch (e) { console.warn(e); }
+  }
   ajustarQualidade();
 }
 
@@ -468,9 +507,9 @@ function aoMudarVisibilidade() {
     temporizadorAbaEscondida = setTimeout(() => {
       if (!document.hidden || document.pictureInPictureElement) return;
       for (const [id, par] of estado.pares) {
-        if (!par.compartilhando || par.euPausei || par.relay || par.videoSuspenso) continue;
+        if (!(par.compartilhando || par.camera) || par.videoSuspenso) continue;
         par.videoSuspenso = true;
-        sinal("assistir", { ativo: true, video: false }, id);
+        sinal("assistir", { ativo: !par.euPausei, video: false }, id);
       }
     }, ESPERA_ABA_ESCONDIDA_MS);
   } else {
@@ -696,8 +735,24 @@ function atualizarInfoDesempenho() {
 }
 
 // ---------- Qualidade adaptativa ----------
+async function ajustarCamera() {
+  for (const par of estado.pares.values()) {
+    for (const { sender, track } of par.enviosCamera) {
+      if (track.kind !== "video") continue;
+      try {
+        const p = sender.getParameters();
+        if (!p.encodings || !p.encodings.length) continue;
+        p.encodings[0].maxBitrate = CAMERA.bitrate;
+        p.encodings[0].maxFramerate = CAMERA.fps;
+        await sender.setParameters(p);
+      } catch { /* ainda negociando */ }
+    }
+  }
+}
+
 async function ajustarQualidade() {
   const info = $("info-envio");
+  ajustarCamera();
   if (!estado.minhaTela) { info.textContent = ""; return; }
   const q = qualidadeAtual();
   const viaServidor = estado.gravacao?.assinantes.size || 0;
@@ -705,7 +760,8 @@ async function ajustarQualidade() {
     .filter(([id, p]) => p.envios.length && !p.elePausou && !p.eleSemVideo && !estado.gravacao?.assinantes.has(id))
     .map(([, p]) => p);
   // Quem recebe via servidor também sai do meu upload (uma cópia da gravação, não importa quantos).
-  const orcamento = orcamentoUpload() - (viaServidor ? q.gravacao : 0);
+  const comCamera = estado.minhaCamera ? [...estado.pares.values()].filter((p) => p.enviosCamera.length && !p.eleSemVideoCamera).length : 0;
+  const orcamento = Math.max(BITRATE_MINIMO, orcamentoUpload() - (viaServidor ? q.gravacao : 0) - comCamera * CAMERA.bitrate);
   const porPessoa = Math.max(BITRATE_MINIMO, Math.min(q.maximo, orcamento / Math.max(1, recebendo.length)));
 
   for (const par of recebendo) {
@@ -824,13 +880,13 @@ function conectar(reconectando) {
         const par = criarPar(p.id, p.nome);
         par.compartilhando = p.compartilhando;
       }
-      if (estado.minhaTela) sinal("estado", estadoDoMeuCompartilhamento());
+      if (estado.minhaTela || estado.minhaCamera) sinal("estado", estadoDoMeuCompartilhamento());
       mostrar($("aviso-conexao"), false);
       abrirSala();
     },
     entrou({ id, nome }) {
       criarPar(id, nome);
-      if (estado.minhaTela) sinal("estado", estadoDoMeuCompartilhamento(), id);
+      if (estado.minhaTela || estado.minhaCamera) sinal("estado", estadoDoMeuCompartilhamento(), id);
       desenharPessoas();
       toast(`${nome} entrou na sala`);
     },
@@ -859,7 +915,17 @@ function conectar(reconectando) {
         const par = estado.pares.get(de);
         if (!par) return;
         const antes = par.compartilhando;
+        const cameraAntes = par.camera;
         par.compartilhando = Boolean(dados && dados.compartilhando);
+        par.camera = Boolean(dados && dados.camera);
+        par.telaId = typeof dados?.telaId === "string" ? dados.telaId : null;
+        par.cameraId = typeof dados?.cameraId === "string" ? dados.cameraId : null;
+        // Fluxos que deixaram de valer (parou a tela, desligou a câmera) saem da lista.
+        for (const fid of [...par.fluxos.keys()]) {
+          if (fid !== par.telaId && fid !== par.cameraId && (par.telaId || fid === cameraAntes)) par.fluxos.delete(fid);
+        }
+        classificarFluxos(par);
+        if (!cameraAntes && par.camera) toast(`${par.nome} ligou a câmera`);
         par.temAudio = Boolean(dados && dados.audio);
         // Versões antigas da página não mandam o motivo.
         par.motivoSemAudio = par.temAudio ? null : (dados?.motivoSemAudio || (dados && !("motivoSemAudio" in dados) ? "antigo" : "nao-capturado"));
@@ -905,6 +971,7 @@ function abrirSala() {
 function sair() {
   estado.saindo = true;
   pararCompartilhar();
+  desligarCamera();
   estado.ws?.close();
   estado.ws = null;
   for (const id of [...estado.pares.keys()]) removerPar(id);
@@ -951,6 +1018,9 @@ function motivoSemAudio() {
 
 function estadoDoMeuCompartilhamento() {
   return {
+    telaId: estado.fluxoEnvio?.id || null,
+    camera: Boolean(estado.minhaCamera),
+    cameraId: estado.minhaCamera?.id || null,
     compartilhando: Boolean(estado.minhaTela),
     audio: Boolean(estado.minhaTela) && !motivoSemAudio(),
     motivoSemAudio: motivoSemAudio(),
@@ -1057,11 +1127,70 @@ function pararCompartilhar() {
   estado.desempenho = null;
   atualizarInfoDesempenho();
   mostrarAvisoSom(null);
-  sinal("estado", { compartilhando: false });
+  sinal("estado", estadoDoMeuCompartilhamento()); // continua anunciando a câmera, se ligada
   atualizarBotaoCompartilhar();
   desenharPessoas();
   desenharBlocos();
   ajustarQualidade();
+}
+
+// ---------- Câmera ----------
+async function alternarCamera() {
+  if (estado.minhaCamera) return desligarCamera();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast("Este navegador não dá acesso à câmera aqui. Abra o site pelo link HTTPS.");
+    return;
+  }
+  let camera;
+  try {
+    camera = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: CAMERA.largura }, height: { ideal: CAMERA.altura }, frameRate: { ideal: CAMERA.fps, max: CAMERA.fps }, facingMode: "user" },
+      audio: false, // o som fica com a tela (e a conversa, com o Discord ou o app de voz de vocês)
+    });
+  } catch (e) {
+    toast(e?.name === "NotAllowedError"
+      ? "O navegador não deu permissão para a câmera. Libere no ícone de câmera da barra de endereço e tente de novo."
+      : e?.name === "NotFoundError" ? "Nenhuma câmera encontrada neste aparelho." : "Não foi possível ligar a câmera (ela pode estar em uso por outro programa).", 7000);
+    return;
+  }
+  const video = camera.getVideoTracks()[0];
+  video.contentHint = "motion";
+  video.addEventListener("ended", desligarCamera); // câmera desconectada ou tirada pelo sistema
+  estado.minhaCamera = camera;
+  for (const par of estado.pares.values()) enviarCameraPara(par);
+  sinal("estado", estadoDoMeuCompartilhamento());
+  atualizarBotaoCamera();
+  desenharPessoas();
+  desenharBlocos();
+  ajustarQualidade();
+}
+
+function desligarCamera() {
+  const camera = estado.minhaCamera;
+  if (!camera) return;
+  estado.minhaCamera = null;
+  camera.getTracks().forEach((t) => t.stop());
+  for (const par of estado.pares.values()) {
+    for (const { sender } of par.enviosCamera) {
+      try { par.pc.removeTrack(sender); } catch { /* conexão já fechada */ }
+    }
+    par.enviosCamera = [];
+  }
+  if (estado.destaque === "eu:cam") estado.destaque = null;
+  sinal("estado", estadoDoMeuCompartilhamento());
+  atualizarBotaoCamera();
+  desenharPessoas();
+  desenharBlocos();
+  ajustarQualidade();
+}
+
+function atualizarBotaoCamera() {
+  const btn = $("btn-camera");
+  const ligada = Boolean(estado.minhaCamera);
+  btn.classList.toggle("ligada", ligada);
+  btn.replaceChildren(icone(ligada ? "camera-off" : "camera"), Object.assign(document.createElement("span"), {
+    textContent: ligada ? "Desligar câmera" : "Ligar câmera",
+  }));
 }
 
 function alternarPausa(id) {
@@ -1186,8 +1315,8 @@ function alternarMudo(chave) {
 function desenharPessoas() {
   const lista = $("lista-pessoas");
   lista.replaceChildren();
-  const pessoas = [{ nome: estado.nome, rotulo: estado.nome + " (você)", aoVivo: Boolean(estado.minhaTela) }];
-  for (const par of estado.pares.values()) pessoas.push({ nome: par.nome, rotulo: par.nome, aoVivo: par.compartilhando });
+  const pessoas = [{ nome: estado.nome, rotulo: estado.nome + " (você)", aoVivo: Boolean(estado.minhaTela), camera: Boolean(estado.minhaCamera) }];
+  for (const par of estado.pares.values()) pessoas.push({ nome: par.nome, rotulo: par.nome, aoVivo: par.compartilhando, camera: par.camera });
   for (const p of pessoas) {
     const el = document.createElement("span");
     el.className = "pessoa" + (p.aoVivo ? " ao-vivo" : "");
@@ -1197,6 +1326,12 @@ function desenharPessoas() {
       selo.className = "selo vivo";
       selo.textContent = "AO VIVO";
       el.appendChild(selo);
+    }
+    if (p.camera) {
+      const cam = icone("camera");
+      cam.classList.add("icone-camera");
+      cam.setAttribute("aria-label", "câmera ligada");
+      el.appendChild(cam);
     }
     lista.appendChild(el);
   }
@@ -1216,7 +1351,8 @@ function botaoIcone(nomeIcone, titulo, aoClicar) {
 function criarBloco(chave) {
   // (o medidor de som fica na legenda; ver atualizarBloco)
   const bloco = document.createElement("div");
-  bloco.className = "bloco" + (chave === "eu" ? " minha" : "");
+  const ehCamera = chave.endsWith(":cam");
+  bloco.className = "bloco" + (chave === "eu" ? " minha" : "") + (ehCamera ? " camera" : "") + (chave === "eu:cam" ? " camera-propria" : "");
   bloco.dataset.chave = chave;
   const video = document.createElement("video");
   video.autoplay = true;
@@ -1239,7 +1375,7 @@ function criarBloco(chave) {
   sobre.addEventListener("click", () => { if (estado.pares.get(chave)?.euPausei) alternarPausa(chave); });
   const acoes = document.createElement("div");
   acoes.className = "acoes-bloco";
-  if (chave !== "eu") {
+  if (chave !== "eu" && !ehCamera) {
     const som = botaoIcone("som", "Silenciar esta tela", () => alternarMudo(chave));
     som.classList.add("btn-som");
     // Volume desta tela. Fica no site (e não no player do navegador) para existir um controle só:
@@ -1338,16 +1474,19 @@ function atualizarBloco(bloco, d) {
     filhos.push(selo);
   }
   // Diz se a tela tem som, para ninguém ficar procurando volume numa tela que foi sem áudio.
-  const selo = document.createElement("span");
-  selo.className = "selo som" + (d.audio ? "" : " sem");
-  selo.title = d.audio ? "Esta tela está com som" : (d.explicacaoSemSom || "Esta tela foi compartilhada sem som") + " (clique para ver)";
-  if (!d.audio && d.explicacaoSemSom) {
-    selo.classList.add("clicavel");
-    selo.addEventListener("click", (e) => { e.stopPropagation(); toast(d.explicacaoSemSom, 9000); });
+  // A câmera vai sem som, então nela não aparece.
+  if (!d.camera) {
+    const selo = document.createElement("span");
+    selo.className = "selo som" + (d.audio ? "" : " sem");
+    selo.title = d.audio ? "Esta tela está com som" : (d.explicacaoSemSom || "Esta tela foi compartilhada sem som") + " (clique para ver)";
+    if (!d.audio && d.explicacaoSemSom) {
+      selo.classList.add("clicavel");
+      selo.addEventListener("click", (e) => { e.stopPropagation(); toast(d.explicacaoSemSom, 9000); });
+    }
+    selo.appendChild(icone(d.audio ? "som" : "mudo"));
+    if (d.audio) selo.appendChild(Object.assign(document.createElement("span"), { className: "medidor" }));
+    filhos.push(selo);
   }
-  selo.appendChild(icone(d.audio ? "som" : "mudo"));
-  if (d.audio) selo.appendChild(Object.assign(document.createElement("span"), { className: "medidor" }));
-  filhos.push(selo);
   legenda.replaceChildren(...filhos);
 
   bloco.classList.toggle("destaque", estado.destaque === bloco.dataset.chave);
@@ -1397,9 +1536,28 @@ function descreverTela(par) {
   return { ...base, fluxo: par.fluxo, sobreposicao: { girando: true, titulo: "Conectando…", texto: `Recebendo a tela de ${par.nome}` } };
 }
 
+function descreverCamera(par) {
+  const base = { rotulo: `${par.nome} · câmera`, nomeAvatar: par.nome, eu: false, camera: true, audio: false, resolucao: par.qualidadeCamera };
+  const chegando = par.fluxoCamera?.getVideoTracks().some((t) => t.readyState === "live" && !t.muted);
+  if (par.videoSuspenso) return { ...base, fluxo: par.fluxoCamera };
+  if (chegando) return { ...base, fluxo: par.fluxoCamera };
+  if (par.relay) return { ...base, sobreposicao: { titulo: "Câmera indisponível", texto: "A câmera precisa de conexão direta, que a sua rede bloqueou. A tela continua chegando via servidor." } };
+  return { ...base, fluxo: par.fluxoCamera, sobreposicao: { girando: true, titulo: "Conectando câmera…" } };
+}
+
+function pesoDaChave(chave) {
+  if (chave === estado.destaque) return -1;
+  const dono = chave.replace(/:cam$/, "");
+  const posicao = dono === "eu" ? 0 : 1 + [...estado.pares.keys()].indexOf(dono);
+  return posicao * 2 + (chave.endsWith(":cam") ? 1 : 0);
+}
+
 function desenharBlocos() {
   const grade = $("grade");
   const desejados = new Map();
+  if (estado.minhaCamera) {
+    desejados.set("eu:cam", { rotulo: "Sua câmera", nomeAvatar: estado.nome, fluxo: estado.minhaCamera, eu: true, camera: true, audio: false });
+  }
   if (estado.minhaTela) {
     // Mostra o que os outros recebem (o medidor de som já inclui o reforço de volume).
     desejados.set("eu", { rotulo: "Sua tela", nomeAvatar: estado.nome, fluxo: estado.fluxoEnvio || estado.minhaTela, eu: true,
@@ -1408,7 +1566,10 @@ function desenharBlocos() {
       limiteDoEnvio: estado.desempenho?.limite,
       selo: { classe: "vivo", texto: "AO VIVO" } });
   }
-  for (const [id, par] of estado.pares) if (par.compartilhando) desejados.set(id, descreverTela(par));
+  for (const [id, par] of estado.pares) {
+    if (par.compartilhando) desejados.set(id, descreverTela(par));
+    if (par.camera) desejados.set(`${id}:cam`, descreverCamera(par));
+  }
   if (estado.destaque && !desejados.has(estado.destaque)) estado.destaque = null;
   // Mantém os blocos existentes para o vídeo não piscar a cada atualização.
   for (const bloco of [...grade.children]) {
@@ -1419,9 +1580,18 @@ function desenharBlocos() {
     if (!bloco) { bloco = criarBloco(chave); grade.appendChild(bloco); }
     atualizarBloco(bloco, d);
   }
-  // O destacado vai para o topo, ocupando a largura toda.
-  const destacado = estado.destaque && grade.querySelector(`[data-chave="${CSS.escape(estado.destaque)}"]`);
-  if (destacado && grade.firstChild !== destacado) grade.prepend(destacado);
+  // Ordem: o destacado primeiro, depois eu, depois cada pessoa com a tela e, ao lado, a câmera.
+  // Só mexe no DOM se a ordem mudou: tirar um <video> do lugar pausa o vídeo.
+  const ordem = [...desejados.keys()].sort((a, b) => pesoDaChave(a) - pesoDaChave(b));
+  const atual = [...grade.children].map((b) => b.dataset.chave);
+  if (ordem.join("|") !== atual.join("|")) {
+    for (const chave of ordem) {
+      const bloco = grade.querySelector(`[data-chave="${CSS.escape(chave)}"]`);
+      grade.appendChild(bloco);
+      const v = bloco.querySelector("video");
+      if (v.paused && !v.dataset.url) tocar(v);
+    }
+  }
   grade.classList.toggle("muitos", desejados.size >= 4);
   mostrar($("vazio"), desejados.size === 0);
 }
@@ -1449,6 +1619,8 @@ $("sel-upload").addEventListener("change", () => { gravarLocal("upload-v2", $("s
 
 $("form-entrada").addEventListener("submit", (e) => { e.preventDefault(); mostrar($("erro-entrada"), false); entrar(); });
 $("btn-compartilhar").addEventListener("click", compartilhar);
+$("btn-camera").addEventListener("click", alternarCamera);
+if (!navigator.mediaDevices?.getUserMedia) $("btn-camera").classList.add("oculto");
 $("btn-ativar-som").addEventListener("click", ativarSom);
 // Áudio vem ligado por padrão; quem desligar, fica desligado só para essa pessoa. A chave
 // "audio-v2" zera a escolha antiga (de quando o padrão era desligado), para todos voltarem com som.

@@ -1,8 +1,8 @@
 # Relatório de testes
 
-Gerado por `npm test` em 2026-11-26 03:28 UTC.
+Gerado por `npm test` em 2026-11-26 03:37 UTC.
 
-**52 de 52 verificações passaram**.
+**65 de 65 verificações passaram**.
 
 ## Ambiente
 
@@ -15,22 +15,24 @@ Gerado por `npm test` em 2026-11-26 03:28 UTC.
 
 | Cenário | Medida | Valor |
 |---|---|---|
-| Compartilhar e assistir (conexão direta) | Tempo até a primeira imagem (direto) | 225 ms |
-| Compartilhar e assistir (conexão direta) | Resolução recebida (Full HD, 1 pessoa) | 1280×720 |
+| Compartilhar e assistir (conexão direta) | Tempo até a primeira imagem (direto) | 248 ms |
+| Compartilhar e assistir (conexão direta) | Resolução recebida (Full HD, 1 pessoa) | 1920×1080 |
 | Compartilhar e assistir (conexão direta) | FPS recebido (Full HD, 1 pessoa) | 60 fps |
 | Compartilhar e assistir (conexão direta) | Codec | video/H264 |
-| Modo via servidor (rede que bloqueia conexão direta) | Tempo até a primeira imagem (via servidor, inclui 7 s de espera da direta) | 10626 ms |
-| Modo via servidor (rede que bloqueia conexão direta) | Atraso do modo via servidor (buffer) | 0.98 s |
+| Modo via servidor (rede que bloqueia conexão direta) | Tempo até a primeira imagem (via servidor, inclui 7 s de espera da direta) | 10939 ms |
+| Modo via servidor (rede que bloqueia conexão direta) | Atraso do modo via servidor (buffer) | 1.00 s |
 | Modo via servidor (rede que bloqueia conexão direta) | Travadas do player em 6 s (via servidor) | 1 |
 | Modo via servidor (rede que bloqueia conexão direta) | Resolução via servidor | 1080p |
-| Sala cheia: 10 pessoas, 3 compartilhando | Tempo para 10 pessoas entrarem | 2099 ms |
-| Sala cheia: 10 pessoas, 3 compartilhando | Tempo até 3 telas aparecerem para quem assiste (10 na sala) | 3837 ms |
-| Som | Bitrate do som (direto) | 129 kbps |
+| Sala cheia: 10 pessoas, 3 compartilhando | Tempo para 10 pessoas entrarem | 2016 ms |
+| Sala cheia: 10 pessoas, 3 compartilhando | Tempo até 3 telas aparecerem para quem assiste (10 na sala) | 3968 ms |
+| Som | Bitrate do som (direto) | 128 kbps |
 | Som | Som baixo (−29 dB) com reforço | -11.4 dB |
 | Som | Ganho do 'Reforçar volume' | 17.0 dB |
-| Queda e volta do servidor | Tempo para voltar a ver a tela depois da queda | 2151 ms |
-| Upload automático (não saturar a internet) | Tempo para cortar o envio quando a internet engasga | 466 ms |
-| Upload automático (não saturar a internet) | Envio: normal → engasgando → recuperado | 12.0 → 4.3 → 6.5 Mbps |
+| Câmera | Tempo até a câmera aparecer | 184 ms |
+| Câmera | Câmera recebida | 1280×720 (720p · 19 fps) |
+| Queda e volta do servidor | Tempo para voltar a ver a tela depois da queda | 2148 ms |
+| Upload automático (não saturar a internet) | Tempo para cortar o envio quando a internet engasga | 495 ms |
+| Upload automático (não saturar a internet) | Envio: normal → engasgando → recuperado | 12.0 → 4.5 → 7.8 Mbps |
 | Qualidade 4K | Resolução recebida (4K) | 3840×2160 |
 | Qualidade 4K | FPS recebido (4K, tela de teste a 30 fps) | 16 fps |
 
@@ -38,18 +40,18 @@ Gerado por `npm test` em 2026-11-26 03:28 UTC.
 
 ### ✅ Compartilhar e assistir (conexão direta) (7 s)
 
-- ✅ chega pelo menos em 720p — `720p`
+- ✅ chega pelo menos em 720p — `1080p`
 - ✅ chega com pelo menos 25 fps — `60 fps`
 - ✅ a tela mostra o selo 'direto'
-- ✅ o selo mostra a resolução real — `720p · 61 fps ⚠`
+- ✅ o selo mostra a resolução real — `1080p · 60 fps`
 - ✅ parar de compartilhar some com a tela para os outros
 
 ### ✅ Modo via servidor (rede que bloqueia conexão direta) (17 s)
 
 - ✅ a tela mostra o selo 'via servidor'
-- ✅ o vídeo anda (mais de 4 s de vídeo em 6 s) — `5.0 s`
-- ✅ atraso abaixo de 3,5 s — `0.98 s`
-- ✅ o som também chega via servidor — `90146 bytes`
+- ✅ o vídeo anda (mais de 4 s de vídeo em 6 s) — `5.3 s`
+- ✅ atraso abaixo de 3,5 s — `1.00 s`
+- ✅ o som também chega via servidor — `93982 bytes`
 - ✅ o player quase não trava (no máximo 3 vezes em 6 s) — `1`
 
 ### ✅ Sala cheia: 10 pessoas, 3 compartilhando (7 s)
@@ -63,7 +65,7 @@ Gerado por `npm test` em 2026-11-26 03:28 UTC.
 
 - ✅ 'Incluir áudio' vem ligado
 - ✅ 'Reforçar volume' vem ligado
-- ✅ som em qualidade de música (≥ 96 kbps) — `129 kbps`
+- ✅ som em qualidade de música (≥ 96 kbps) — `128 kbps`
 - ✅ o reforço aumenta o som baixo em pelo menos 10 dB — `17.0 dB`
 - ✅ o reforço não estoura (abaixo de 0 dB) — `-11.4 dB`
 - ✅ silenciar uma tela continua valendo depois de vários redesenhos
@@ -77,6 +79,22 @@ Gerado por `npm test` em 2026-11-26 03:28 UTC.
 - ✅ quem compartilha vê o aviso fixo de 'sem som'
 - ✅ 'Compartilhar de novo com som' resolve e o aviso some
 - ✅ se a captura de som para no meio, quem assiste vê 'parou'
+
+### ✅ Câmera (21 s)
+
+- ✅ ligar a câmera cria um quadro 'Ana · câmera' para os outros — `["Ana · câmera"]`
+- ✅ a própria câmera aparece (espelhada) para quem ligou
+- ✅ o botão vira 'Desligar câmera'
+- ✅ tela e câmera juntas aparecem em dois quadros — `["Ana","Ana · câmera"]`
+- ✅ o quadro da tela mostra a tela e o da câmera mostra a câmera (não trocados) — `tela 1920×1080, câmera 1280×720`
+- ✅ a câmera vai em até 720p — `720p`
+- ✅ quem entra depois vê a tela e a câmera
+- ✅ parar a tela mantém a câmera ligada
+- ✅ com a aba escondida, a câmera também para de chegar (alivia o PC) — `0 quadros`
+- ✅ voltou para a aba: a câmera volta
+- ✅ desligar a câmera tira o quadro dos outros
+- ✅ no celular o botão de câmera aparece
+- ✅ a câmera do celular chega para os outros
 
 ### ✅ Tela cheia e aba escondida (20 s)
 
@@ -96,14 +114,14 @@ Gerado por `npm test` em 2026-11-26 03:28 UTC.
 ### ✅ Upload automático (não saturar a internet) (21 s)
 
 - ✅ 'Seu upload' vem em Automático
-- ✅ corta o envio quando o atraso sobe — `12.0 → 4.3 Mbps`
-- ✅ volta a subir quando normaliza — `4.3 → 6.5 Mbps`
+- ✅ corta o envio quando o atraso sobe — `12.0 → 4.5 Mbps`
+- ✅ volta a subir quando normaliza — `4.5 → 7.8 Mbps`
 
 ### ✅ Qualidade 4K (9 s)
 
 - ✅ 4K chega em 2160p (resolução travada) — `2160p`
 
-### ✅ Segurança e robustez do servidor (0 s)
+### ✅ Segurança e robustez do servidor (1 s)
 
 - ✅ não aceita conexões de outros PCs da rede (Firewall não precisa liberar) — `recusou`
 - ✅ não entrega arquivos fora da pasta do site (/..%2fserver.js) — `403`

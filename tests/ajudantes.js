@@ -9,7 +9,8 @@ const { chromium } = require("playwright");
 const { iniciarServidor } = require("../server");
 
 async function abrirNavegador() {
-  const args = ["--autoplay-policy=no-user-gesture-required"];
+  // Câmera falsa do Chromium (um padrão animado) e permissão automática para ela.
+  const args = ["--autoplay-policy=no-user-gesture-required", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"];
   try {
     return await chromium.launch({ args });
   } catch (e) {
