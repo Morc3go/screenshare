@@ -564,6 +564,7 @@ function alimentarRelay(par) {
   if (!r?.sb || r.sb.updating || r.ms.readyState !== "open") return;
   const video = document.querySelector(`[data-chave="${CSS.escape(idDoPar(par))}"] video`);
   if (video && r.sb.buffered.length) {
+    pularBuraco(video);
     const fim = r.sb.buffered.end(r.sb.buffered.length - 1);
     const folga = fim - video.currentTime;
     const alvo = r.folga ?? FOLGA_RELAY_S;
@@ -586,6 +587,23 @@ function alimentarRelay(par) {
   }
 }
 
+// Os primeiros pedaços de uma gravação costumam deixar pequenos buracos entre trechos do buffer.
+// Se a posição do player cai num buraco, ele fica parado para sempre esperando dados que nunca
+// virão, mesmo com segundos de vídeo prontos logo adiante. Pula para o começo do próximo trecho
+// (o mesmo que os players de transmissão ao vivo fazem). Devolve true se pulou.
+function pularBuraco(video) {
+  const b = video.buffered;
+  const t = video.currentTime;
+  for (let i = 0; i < b.length; i++) {
+    if (t >= b.start(i) && t < b.end(i) - 0.05) return false; // está dentro de um trecho: tudo certo
+    if (b.start(i) > t) {
+      video.currentTime = b.start(i) + 0.01;
+      return true;
+    }
+  }
+  return false;
+}
+
 function idDoPar(par) {
   for (const [id, p] of estado.pares) if (p === par) return id;
   return "";
@@ -593,9 +611,8 @@ function idDoPar(par) {
 
 // ---------- Plano B: tela via servidor (lado de quem compartilha) ----------
 function escolherMime() {
-  // A gravação do modo via servidor é por software. Em 60 fps o VP9 pesa demais no processador e
-  // derruba o fps; o VP8 é bem mais leve. Abaixo disso, o VP9 dá imagem melhor no mesmo bitrate.
-  const codecs = qualidadeAtual().fps >= 60 ? ["vp8", "vp9"] : ["vp9", "vp8"];
+  // A gravação do modo via servidor é por software: o VP8 pesa bem menos no processador que o VP9.
+  const codecs = ["vp8", "vp9"];
   const comAudio = estado.fluxoEnvio.getAudioTracks().length > 0;
   const opcoes = [...codecs.map((c) => `video/webm;codecs=${c}${comAudio ? ",opus" : ""}`), "video/webm"];
   return opcoes.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || null;
@@ -1209,6 +1226,8 @@ function criarBloco(chave) {
   // pede mais margem; rede boa fica com pouco atraso.
   video.addEventListener("waiting", () => {
     if (!video.dataset.url) return;
+    // Parou num buraco do buffer: pula e segue, sem aumentar a folga (não é falta de dados).
+    if (pularBuraco(video)) return;
     video.pause();
     const r = estado.pares.get(chave)?.relay;
     if (r) r.folga = Math.min(FOLGA_RELAY_MAX_S, (r.folga ?? FOLGA_RELAY_S) + FOLGA_RELAY_PASSO_S);

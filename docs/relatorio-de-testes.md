@@ -1,6 +1,6 @@
 # Relatório de testes
 
-Gerado por `npm test` em 2026-11-26 03:06 UTC.
+Gerado por `npm test` em 2026-11-26 03:28 UTC.
 
 **52 de 52 verificações passaram**.
 
@@ -15,41 +15,41 @@ Gerado por `npm test` em 2026-11-26 03:06 UTC.
 
 | Cenário | Medida | Valor |
 |---|---|---|
-| Compartilhar e assistir (conexão direta) | Tempo até a primeira imagem (direto) | 204 ms |
+| Compartilhar e assistir (conexão direta) | Tempo até a primeira imagem (direto) | 225 ms |
 | Compartilhar e assistir (conexão direta) | Resolução recebida (Full HD, 1 pessoa) | 1280×720 |
-| Compartilhar e assistir (conexão direta) | FPS recebido (Full HD, 1 pessoa) | 61 fps |
+| Compartilhar e assistir (conexão direta) | FPS recebido (Full HD, 1 pessoa) | 60 fps |
 | Compartilhar e assistir (conexão direta) | Codec | video/H264 |
-| Modo via servidor (rede que bloqueia conexão direta) | Tempo até a primeira imagem (via servidor, inclui 7 s de espera da direta) | 10493 ms |
-| Modo via servidor (rede que bloqueia conexão direta) | Atraso do modo via servidor (buffer) | 1.37 s |
+| Modo via servidor (rede que bloqueia conexão direta) | Tempo até a primeira imagem (via servidor, inclui 7 s de espera da direta) | 10626 ms |
+| Modo via servidor (rede que bloqueia conexão direta) | Atraso do modo via servidor (buffer) | 0.98 s |
 | Modo via servidor (rede que bloqueia conexão direta) | Travadas do player em 6 s (via servidor) | 1 |
 | Modo via servidor (rede que bloqueia conexão direta) | Resolução via servidor | 1080p |
-| Sala cheia: 10 pessoas, 3 compartilhando | Tempo para 10 pessoas entrarem | 1904 ms |
-| Sala cheia: 10 pessoas, 3 compartilhando | Tempo até 3 telas aparecerem para quem assiste (10 na sala) | 3841 ms |
+| Sala cheia: 10 pessoas, 3 compartilhando | Tempo para 10 pessoas entrarem | 2099 ms |
+| Sala cheia: 10 pessoas, 3 compartilhando | Tempo até 3 telas aparecerem para quem assiste (10 na sala) | 3837 ms |
 | Som | Bitrate do som (direto) | 129 kbps |
 | Som | Som baixo (−29 dB) com reforço | -11.4 dB |
 | Som | Ganho do 'Reforçar volume' | 17.0 dB |
-| Queda e volta do servidor | Tempo para voltar a ver a tela depois da queda | 2159 ms |
-| Upload automático (não saturar a internet) | Tempo para cortar o envio quando a internet engasga | 528 ms |
-| Upload automático (não saturar a internet) | Envio: normal → engasgando → recuperado | 12.0 → 2.3 → 4.7 Mbps |
+| Queda e volta do servidor | Tempo para voltar a ver a tela depois da queda | 2151 ms |
+| Upload automático (não saturar a internet) | Tempo para cortar o envio quando a internet engasga | 466 ms |
+| Upload automático (não saturar a internet) | Envio: normal → engasgando → recuperado | 12.0 → 4.3 → 6.5 Mbps |
 | Qualidade 4K | Resolução recebida (4K) | 3840×2160 |
-| Qualidade 4K | FPS recebido (4K, tela de teste a 30 fps) | 18 fps |
+| Qualidade 4K | FPS recebido (4K, tela de teste a 30 fps) | 16 fps |
 
 ## Verificações
 
 ### ✅ Compartilhar e assistir (conexão direta) (7 s)
 
 - ✅ chega pelo menos em 720p — `720p`
-- ✅ chega com pelo menos 25 fps — `61 fps`
+- ✅ chega com pelo menos 25 fps — `60 fps`
 - ✅ a tela mostra o selo 'direto'
-- ✅ o selo mostra a resolução real — `720p · 60 fps ⚠`
+- ✅ o selo mostra a resolução real — `720p · 61 fps ⚠`
 - ✅ parar de compartilhar some com a tela para os outros
 
 ### ✅ Modo via servidor (rede que bloqueia conexão direta) (17 s)
 
 - ✅ a tela mostra o selo 'via servidor'
-- ✅ o vídeo anda (mais de 4 s de vídeo em 6 s) — `4.8 s`
-- ✅ atraso abaixo de 3,5 s — `1.37 s`
-- ✅ o som também chega via servidor — `86310 bytes`
+- ✅ o vídeo anda (mais de 4 s de vídeo em 6 s) — `5.0 s`
+- ✅ atraso abaixo de 3,5 s — `0.98 s`
+- ✅ o som também chega via servidor — `90146 bytes`
 - ✅ o player quase não trava (no máximo 3 vezes em 6 s) — `1`
 
 ### ✅ Sala cheia: 10 pessoas, 3 compartilhando (7 s)
@@ -96,8 +96,8 @@ Gerado por `npm test` em 2026-11-26 03:06 UTC.
 ### ✅ Upload automático (não saturar a internet) (21 s)
 
 - ✅ 'Seu upload' vem em Automático
-- ✅ corta o envio quando o atraso sobe — `12.0 → 2.3 Mbps`
-- ✅ volta a subir quando normaliza — `2.3 → 4.7 Mbps`
+- ✅ corta o envio quando o atraso sobe — `12.0 → 4.3 Mbps`
+- ✅ volta a subir quando normaliza — `4.3 → 6.5 Mbps`
 
 ### ✅ Qualidade 4K (9 s)
 
