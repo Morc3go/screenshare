@@ -610,7 +610,10 @@ function conectar(reconectando) {
       }
       if (reconectando) sair();
     },
-    "bem-vindo"({ id, participantes, maxPorSala }) {
+    "bem-vindo"({ id, participantes, maxPorSala, versao }) {
+      // O app de quem hospeda foi atualizado enquanto esta página estava aberta: o código aqui é
+      // o antigo. Pede para recarregar (não recarrega sozinho para não derrubar um compartilhamento).
+      if (versao && estado.versaoPagina && versao !== estado.versaoPagina) mostrar($("aviso-versao"), true);
       entrou = true;
       estado.maxPorSala = maxPorSala || estado.maxPorSala;
       // Reconexão gera um id novo: descarta as conexões antigas.
@@ -654,6 +657,9 @@ function conectar(reconectando) {
         const antes = par.compartilhando;
         par.compartilhando = Boolean(dados && dados.compartilhando);
         par.temAudio = Boolean(dados && dados.audio);
+        // Versões antigas da página não mandam o motivo.
+        par.motivoSemAudio = par.temAudio ? null : (dados?.motivoSemAudio || (dados && !("motivoSemAudio" in dados) ? "antigo" : "nao-capturado"));
+        par.navegador = typeof dados?.navegador === "string" ? dados.navegador.slice(0, 20) : "navegador";
         if (!par.compartilhando) {
           par.euPausei = false; // próxima vez começa assistindo
           if (par.relay) desligarRelay(de, par);
@@ -714,9 +720,48 @@ function atualizarBotaoCompartilhar() {
   }));
 }
 
-function estadoDoMeuCompartilhamento() {
-  return { compartilhando: Boolean(estado.minhaTela), audio: Boolean(estado.minhaTela?.getAudioTracks().length) };
+function detectarNavegador() {
+  const ua = navigator.userAgent;
+  if (/Firefox\//.test(ua)) return "Firefox";
+  if (/OPR\/|Opera/.test(ua)) return "Opera";
+  if (/Edg\//.test(ua)) return "Edge";
+  if (navigator.brave) return "Brave";
+  if (/Chrome\//.test(ua)) return "Chrome";
+  if (/Safari\//.test(ua)) return "Safari";
+  return "outro navegador";
 }
+
+// Por que minha tela está sem som (null = está com som). Vai junto no "estado" para quem
+// assiste poder ver o motivo, em vez de só um ícone de som cortado.
+function motivoSemAudio() {
+  const tela = estado.minhaTela;
+  if (!tela) return null;
+  const audio = tela.getAudioTracks()[0];
+  if (audio && audio.readyState === "live") return null;
+  if (audio) return "parou";
+  if (!estado.pediuAudio) return "desligado";
+  if (detectarNavegador() === "Firefox" || detectarNavegador() === "Safari") return "navegador";
+  if (tela.getVideoTracks()[0]?.getSettings().displaySurface === "window") return "janela";
+  return "nao-capturado";
+}
+
+function estadoDoMeuCompartilhamento() {
+  return {
+    compartilhando: Boolean(estado.minhaTela),
+    audio: Boolean(estado.minhaTela) && !motivoSemAudio(),
+    motivoSemAudio: motivoSemAudio(),
+    navegador: detectarNavegador(),
+  };
+}
+
+const EXPLICACAO_SEM_SOM = {
+  desligado: (n) => `${n} compartilhou com "Incluir áudio" desligado.`,
+  navegador: (n, nav) => `${n} está usando o ${nav}, que não manda som de tela. Peça para usar o Chrome ou o Edge.`,
+  janela: (n) => `${n} escolheu uma janela avulsa, que não manda som. Peça para compartilhar a "Tela inteira" (com "Compartilhar áudio do sistema" ligado) ou uma aba.`,
+  "nao-capturado": (n, nav) => `O ${nav} de ${n} não entregou o som. No seletor, a opção "Compartilhar áudio do sistema" (embaixo da miniatura da tela) precisa estar LIGADA. Peça para parar e compartilhar de novo.`,
+  parou: (n) => `A captura de som de ${n} parou no meio (o Windows pode ter trocado o dispositivo de saída). Peça para parar e compartilhar de novo.`,
+  antigo: (n) => `${n} está com a página desatualizada. Peça para recarregar a página (F5) e compartilhar de novo.`,
+};
 
 async function compartilhar() {
   if (estado.minhaTela) return pararCompartilhar();
@@ -746,12 +791,24 @@ async function compartilhar() {
     return; // cancelou a escolha
   }
   const faixaAudio = tela.getAudioTracks()[0];
-  if (faixaAudio) faixaAudio.contentHint = "music";
+  if (faixaAudio) {
+    faixaAudio.contentHint = "music";
+    // A captura de som pode parar sozinha (ex.: o Windows troca o dispositivo de saída ao entrar
+    // numa chamada). Avisa quem compartilha e quem assiste.
+    faixaAudio.addEventListener("ended", () => {
+      if (estado.minhaTela !== tela) return;
+      mostrarAvisoSom("parou");
+      sinal("estado", estadoDoMeuCompartilhamento());
+      desenharBlocos();
+    });
+  }
+  estado.pediuAudio = $("com-audio").checked;
   estado.minhaTela = tela;
   estado.silencioDesde = Date.now();
   // Aviso fixo (não some sozinho) quando a tela foi sem som: o seletor do Chrome deixa
   // "Compartilhar áudio do sistema" desligado em "Tela inteira", e é fácil não perceber.
-  mostrarAvisoSom($("com-audio").checked && !faixaAudio ? "sem-faixa" : null);
+  const motivo = motivoSemAudio();
+  mostrarAvisoSom(motivo && motivo !== "desligado" ? ({ janela: "janela", navegador: "navegador" }[motivo] || "sem-faixa") : null);
   tela.getVideoTracks()[0].contentHint = q.dica;
   // O botão "Parar compartilhamento" do próprio navegador encerra a faixa.
   tela.getVideoTracks()[0].addEventListener("ended", pararCompartilhar);
@@ -863,9 +920,14 @@ function mostrarAvisoSom(tipo) {
   const el = $("aviso-som");
   mostrar(el, Boolean(tipo));
   if (!tipo) return;
-  $("txt-aviso-som").textContent = tipo === "sem-faixa"
+  const texto = {
+    parou: "A captura de som da sua tela PAROU (o Windows pode ter trocado o dispositivo de saída, por exemplo ao entrar numa chamada). Clique em \"Compartilhar de novo com som\".",
+    janela: "Sua tela está indo SEM SOM porque você escolheu uma janela avulsa, que não manda som. Clique em \"Compartilhar de novo com som\" e escolha \"Tela inteira\" (com \"Compartilhar áudio do sistema\" LIGADO) ou uma aba.",
+    navegador: `Sua tela está indo SEM SOM: o ${detectarNavegador()} não manda som de tela. Use o Chrome ou o Edge.`,
+  }[tipo];
+  $("txt-aviso-som").textContent = texto || (tipo === "sem-faixa"
     ? "Sua tela está indo SEM SOM. Clique em \"Compartilhar de novo com som\" e, no seletor, escolha \"Tela inteira\" (ou uma aba) e LIGUE a opção \"Compartilhar áudio do sistema\" embaixo da miniatura. Janelas avulsas e o Firefox não mandam som."
-    : "Nenhum som saindo da sua tela há 20 segundos. Se era para ter som: confira se o volume do Windows não está mudo e se o jogo toca no dispositivo de saída padrão do Windows (é só dele que o navegador captura).";
+    : "Nenhum som saindo da sua tela há 20 segundos. Se era para ter som: confira se o volume do Windows não está mudo e se o jogo toca no dispositivo de saída padrão do Windows (é só dele que o navegador captura).");
 }
 
 async function recompartilharComSom() {
@@ -1005,7 +1067,11 @@ function atualizarBloco(bloco, d) {
   // Diz se a tela tem som, para ninguém ficar procurando volume numa tela que foi sem áudio.
   const selo = document.createElement("span");
   selo.className = "selo som" + (d.audio ? "" : " sem");
-  selo.title = d.audio ? "Esta tela está com som" : "Esta tela foi compartilhada sem som";
+  selo.title = d.audio ? "Esta tela está com som" : (d.explicacaoSemSom || "Esta tela foi compartilhada sem som") + " (clique para ver)";
+  if (!d.audio && d.explicacaoSemSom) {
+    selo.classList.add("clicavel");
+    selo.addEventListener("click", (e) => { e.stopPropagation(); toast(d.explicacaoSemSom, 9000); });
+  }
   selo.appendChild(icone(d.audio ? "som" : "mudo"));
   if (d.audio) selo.appendChild(Object.assign(document.createElement("span"), { className: "medidor" }));
   filhos.push(selo);
@@ -1033,7 +1099,14 @@ function atualizarBloco(bloco, d) {
 }
 
 function descreverTela(par) {
-  const base = { rotulo: par.nome, nomeAvatar: par.nome, eu: false, pausado: par.euPausei, audio: par.temAudio, resolucao: par.qualidadeRecebida };
+  // O ícone de som segue o que chega de verdade (faixa de áudio recebendo pacotes), além do que a
+  // outra pessoa anuncia: assim versões antigas da página não aparecem como "sem som" à toa.
+  const chegandoSom = Boolean(par.fluxo?.getAudioTracks().some((t) => t.readyState === "live" && !t.muted)) ||
+    Boolean(par.relay?.mime?.includes("opus"));
+  const audio = par.temAudio || chegandoSom;
+  const base = { rotulo: par.nome, nomeAvatar: par.nome, eu: false, pausado: par.euPausei, audio,
+    explicacaoSemSom: audio ? "" : (EXPLICACAO_SEM_SOM[par.motivoSemAudio] || EXPLICACAO_SEM_SOM["nao-capturado"])(par.nome, par.navegador || "navegador"),
+    resolucao: par.qualidadeRecebida };
   if (par.euPausei) {
     return { ...base, sobreposicao: { titulo: "Pausado", texto: "Clique para voltar a assistir" } };
   }
@@ -1120,12 +1193,14 @@ setInterval(verificarConexoes, 2000);
 setInterval(medirQualidadeRecebida, 2000);
 setInterval(atualizarMedidores, 150);
 $("btn-recompartilhar").addEventListener("click", recompartilharComSom);
+$("btn-recarregar").addEventListener("click", () => location.reload());
 $("btn-fechar-aviso-som").addEventListener("click", () => mostrarAvisoSom(null));
 
 $("campo-nome").value = lerLocal("nome");
 $("campo-sala").value = new URLSearchParams(location.search).get("sala") || "";
 if (!window.isSecureContext) mostrar($("aviso-seguro"), true);
 fetch("/config").then((r) => r.json()).then((c) => {
+  estado.versaoPagina = c.versao || null;
   mostrar($("rotulo-senha"), c.exigeSenha);
   estado.maxPorSala = c.maxPorSala || estado.maxPorSala;
 }).catch(() => {});

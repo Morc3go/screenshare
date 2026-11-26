@@ -106,6 +106,23 @@ para cada pessoa que está assistindo. Para isso caber no seu upload:
 Várias pessoas compartilhando ao mesmo tempo funciona. O limite é o upload e a CPU de cada uma:
 cada pessoa assistindo direto é uma codificação a mais no PC de quem compartilha.
 
+## Alguém está sem som
+
+Se a tela de alguém aparece com o ícone de som **cortado (vermelho)**, a tela dessa pessoa chegou
+sem áudio. **Clique no ícone**: o site diz o motivo, que pode ser:
+
+- **janela avulsa**: a pessoa escolheu uma janela no seletor; janelas não mandam som. Compartilhe a
+  **Tela inteira** ou uma **Aba**;
+- **"Compartilhar áudio do sistema" desligado**: em "Tela inteira", essa chave embaixo da
+  miniatura vem desligada no Chrome e precisa ser ligada;
+- **navegador**: Firefox e Safari não mandam som de tela; use Chrome ou Edge;
+- **a captura parou**: o Windows trocou o dispositivo de saída no meio (comum ao entrar numa
+  chamada do Discord). Pare e compartilhe de novo;
+- **página desatualizada**: a página da pessoa estava aberta desde antes de uma atualização.
+  Recarregue (F5). O site também mostra um aviso pedindo para recarregar quando isso acontece.
+
+Quem compartilha também vê um aviso vermelho com o motivo e o botão **Compartilhar de novo com som**.
+
 ## Quando a conexão direta não funciona ("via servidor")
 
 O normal é o vídeo ir direto de um navegador para o outro, com o selo verde **direto** na tela.

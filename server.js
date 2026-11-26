@@ -15,6 +15,8 @@ const crypto = require("node:crypto");
 const { WebSocketServer, WebSocket } = require("ws");
 
 const PASTA_PUBLICA = path.join(__dirname, "public");
+// Versão do app: a página compara com a dela para saber se ficou desatualizada.
+const VERSAO = require("./package.json").version;
 const LIMITE_MENSAGEM = 64 * 1024;      // mensagens de texto: um SDP com vários candidatos cabe folgado
 const LIMITE_BINARIO = 4 * 1024 * 1024;  // um pedaço de vídeo retransmitido
 const LIMITE_ATRASO = 8 * 1024 * 1024;   // fila máxima por assinante antes de cortar
@@ -116,7 +118,7 @@ function iniciarServidor(opcoes = {}) {
 
     const id = crypto.randomUUID();
     salas.set(nomeSala, sala);
-    enviar(ws, "bem-vindo", { id, participantes: participantes(sala), maxPorSala });
+    enviar(ws, "bem-vindo", { id, participantes: participantes(sala), maxPorSala, versao: VERSAO });
     // assinantes: quem recebe a tela deste participante retransmitida pelo servidor (ver abaixo).
     const eu = { ws, nome, compartilhando: false, vivo: true, assinantes: new Set() };
     sala.set(id, eu);
@@ -185,7 +187,7 @@ function iniciarServidor(opcoes = {}) {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "GET" && url.pathname === "/config") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-cache" });
-      return res.end(JSON.stringify({ exigeSenha: Boolean(obterSenha()), maxPorSala }));
+      return res.end(JSON.stringify({ exigeSenha: Boolean(obterSenha()), maxPorSala, versao: VERSAO }));
     }
     if (req.method === "GET") return servirEstatico(req, res, url);
     res.writeHead(405).end();

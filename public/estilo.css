@@ -134,7 +134,8 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--acento-
 .selo.vivo { background: var(--ao-vivo); color: #fff; }
 .selo.resolucao { background: rgba(124, 92, 255, .28); color: #d9d0ff; font-variant-numeric: tabular-nums; }
 .selo.som { display: inline-grid; place-items: center; padding: 2px 5px; background: rgba(255,255,255,.12); color: #fff; }
-.selo.som.sem { color: #8d96a8; }
+.selo.som.sem { color: #ffb3ba; background: rgba(255, 77, 94, .25); }
+.selo.som.clicavel { pointer-events: auto; cursor: help; }
 .selo.som { display: inline-flex; align-items: center; gap: 4px; }
 .selo.som svg { width: 14px; height: 14px; }
 /* Medidor de som: barra que enche conforme o nível (--nivel de 0 a 1). */
