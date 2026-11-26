@@ -44,27 +44,43 @@ que o app é aberto.
 
 ### Na sala
 
-- **Qualidade**: *Texto nítido* (código e documentos), *Equilibrado*, *Vídeos e jogos* (mais
-  fluido, menos nítido) ou *Internet fraca*. Pode trocar durante o compartilhamento.
+- **Qualidade**: *Texto nítido* (código e documentos, na resolução nativa do seu monitor),
+  *Equilibrado* (até 1440p, 30 fps), *Vídeos e jogos* (1080p, 60 fps) ou *Internet fraca*.
+  Pode trocar durante o compartilhamento.
+- **Seu upload**: informe a velocidade de **upload** da sua internet (em [fast.com](https://fast.com),
+  clique em "Mais informações"). O app usa 80% dela para a tela. Quanto maior, mais nítida sua
+  tela chega para os outros. O padrão é 20 Mbps.
 - **Pausar** numa tela: você para de receber essa tela, e quem compartilha para de enviar
   para você, sobrando banda para os outros.
 - **Destacar**: amplia uma tela no topo. **Tela cheia**: ocupa o monitor.
 - **Incluir áudio**: transmite o som (Chrome/Edge; no Windows com tela inteira ou aba, no
   macOS só aba).
 
+## Qualidade da imagem
+
+- **Resolução nativa**: no modo *Texto nítido* a tela vai sem reduzir (1440p, 4K…), porque
+  reduzir é o que mais borra texto.
+- **Codec VP9** (ou H.264 no modo de 60 fps): o VP9 tem um modo próprio para conteúdo de tela e
+  deixa texto bem mais nítido que o VP8 padrão no mesmo bitrate.
+- **Resolução tem prioridade**: se faltar banda ou CPU, cai a fluidez (fps), não a nitidez.
+  No modo *Vídeos e jogos* é o contrário.
+- **Começa nítido**: o navegador começa já em 2,5 Mbps, em vez de começar baixo e ir subindo.
+
 ## Como ele aguenta 10 pessoas
 
 Cada pessoa se conecta direto com cada outra, então quem compartilha envia uma cópia da tela
-para cada pessoa que está assistindo. Para isso caber no upload de uma internet comum:
+para cada pessoa que está assistindo. Para isso caber no seu upload:
 
-- o app divide um orçamento de upload (8 a 10 Mbps, conforme a qualidade) entre quem está
-  assistindo. Com 9 pessoas assistindo, cada uma recebe cerca de 0,9 Mbps, o que dá texto
-  legível. Com menos gente, a qualidade sobe sozinha;
-- a contagem aparece na sala ("Enviando para 9 pessoas · até 0,9 Mbps cada");
+- o app divide 80% do upload informado entre quem está assistindo, com teto de 8 Mbps por
+  pessoa (10 no modo de 60 fps). Com 20 Mbps de upload e 9 pessoas assistindo, cada uma recebe
+  até 1,8 Mbps; com 100 Mbps, até 8 Mbps cada;
+- a contagem aparece na sala ("Assistindo você: 9 pessoas direto · até 1,8 Mbps cada");
 - quem pausa uma tela deixa de contar nessa divisão;
-- se sua internet tiver menos de ~8 Mbps de upload, use **Internet fraca** (3 Mbps no total).
+- se o upload informado for maior que o real, o navegador detecta a congestão e reduz sozinho,
+  mas a imagem oscila. Prefira informar um valor um pouco abaixo do medido.
 
-Várias pessoas compartilhando ao mesmo tempo funciona. O limite é o upload de cada uma, não o app.
+Várias pessoas compartilhando ao mesmo tempo funciona. O limite é o upload e a CPU de cada uma:
+cada pessoa assistindo direto é uma codificação a mais no PC de quem compartilha.
 
 ## Quando a conexão direta não funciona ("via servidor")
 
@@ -78,7 +94,7 @@ o modo **via servidor** (selo amarelo):
 - tem cerca de 1 a 2 segundos de atraso, mas funciona em qualquer rede que abra o site;
 - se a conexão direta voltar a funcionar, a tela volta sozinha para **direto**;
 - nesse modo o vídeo passa pelo PC de quem está com o app aberto, então gasta o upload dele
-  (cerca de 1,5 Mbps por pessoa nesse modo, na qualidade "Texto nítido").
+  (até 4 Mbps por pessoa nesse modo, na qualidade "Texto nítido").
 
 Para testar o modo via servidor de propósito, abra a sala com `?so_servidor=1` no fim do link.
 

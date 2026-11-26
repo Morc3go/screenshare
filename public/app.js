@@ -19,14 +19,25 @@ const ICE = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:1
 // ?so_servidor=1 impede a conexão direta, para testar o plano B.
 const FORCAR_SERVIDOR = new URLSearchParams(location.search).has("so_servidor");
 
-// orcamento: upload total que a tela pode usar (bits/s), dividido entre quem assiste.
+// altura: limite de resolução (null = resolução nativa do monitor; reduzir borra texto).
+// maximo: teto de bitrate por pessoa assistindo. O total é limitado pelo upload informado.
 // gravacao: bitrate do plano B (uma cópia só; o servidor é quem replica).
+// codecs: ordem de preferência. VP9 tem modo de conteúdo de tela e deixa texto bem mais nítido
+//   que VP8 no mesmo bitrate; H.264 costuma ter codificador por hardware, bom para 60 fps.
+// degradacao: o que sacrificar quando falta banda/CPU.
 const QUALIDADES = {
-  texto:       { nome: "Texto nítido (código, documentos)", altura: 1080, fps: 15, dica: "detail", orcamento: 8e6,  maximo: 2.5e6, gravacao: 1.5e6 },
-  equilibrado: { nome: "Equilibrado",                       altura: 1080, fps: 30, dica: "detail", orcamento: 10e6, maximo: 3e6,   gravacao: 2e6 },
-  movimento:   { nome: "Vídeos e jogos (mais fluido)",      altura: 720,  fps: 30, dica: "motion", orcamento: 10e6, maximo: 3e6,   gravacao: 2e6 },
-  leve:        { nome: "Internet fraca",                    altura: 720,  fps: 10, dica: "detail", orcamento: 3e6,  maximo: 1e6,   gravacao: 0.6e6 },
+  texto:       { nome: "Texto nítido (código, documentos)", altura: null, fps: 15, dica: "detail", maximo: 8e6,  gravacao: 4e6,   codecs: ["VP9", "AV1", "H264", "VP8"], degradacao: "maintain-resolution" },
+  equilibrado: { nome: "Equilibrado",                       altura: 1440, fps: 30, dica: "detail", maximo: 8e6,  gravacao: 4e6,   codecs: ["VP9", "H264", "AV1", "VP8"], degradacao: "balanced" },
+  movimento:   { nome: "Vídeos e jogos (60 fps)",           altura: 1080, fps: 60, dica: "motion", maximo: 10e6, gravacao: 5e6,   codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "maintain-framerate" },
+  leve:        { nome: "Internet fraca",                    altura: 720,  fps: 10, dica: "detail", maximo: 1e6,  gravacao: 0.8e6, codecs: ["VP9", "VP8", "H264", "AV1"], degradacao: "maintain-resolution", orcamentoMax: 3e6 },
 };
+// Upload que a pessoa diz ter; 80% dele vai para a tela, o resto fica para o resto da internet.
+const UPLOADS_MBPS = [5, 10, 20, 50, 100, 300];
+const UPLOAD_PADRAO_MBPS = 20;
+const FRACAO_DO_UPLOAD = 0.8;
+// O Chrome começa a transmitir em ~300 kbps e sobe devagar, deixando a tela borrada nos
+// primeiros segundos. Esta dica no SDP faz ele começar já num bitrate decente.
+const BITRATE_INICIAL_KBPS = 2500;
 const BITRATE_MINIMO = 250e3;
 const ESPERA_CONEXAO_DIRETA_MS = 7000;
 const FATIA_GRAVACAO_MS = 250;
@@ -71,6 +82,61 @@ function sinal(tipo, dados, para) {
 
 function qualidadeAtual() {
   return QUALIDADES[$("sel-qualidade").value] || QUALIDADES.texto;
+}
+
+function orcamentoUpload() {
+  const total = (Number($("sel-upload").value) || UPLOAD_PADRAO_MBPS) * 1e6 * FRACAO_DO_UPLOAD;
+  return Math.min(total, qualidadeAtual().orcamentoMax ?? Infinity);
+}
+
+function restricoesDaTela(q) {
+  const video = { frameRate: { ideal: q.fps, max: q.fps } };
+  if (q.altura) video.height = { max: q.altura };
+  return video;
+}
+
+// Acrescenta x-google-start-bitrate nos codecs de vídeo do SDP enviado. É lido pelo navegador
+// do OUTRO lado ao aplicar a descrição, e vale para o que ele enviar; como os dois lados fazem
+// isso, quem compartilha sempre recebe a dica. Navegadores que não conhecem o parâmetro o ignoram.
+function ajustarSdp(descricao) {
+  const linhas = descricao.sdp.split("\r\n");
+  let emVideo = false;
+  const tiposVideo = new Set();
+  for (const l of linhas) {
+    if (l.startsWith("m=")) emVideo = l.startsWith("m=video");
+    const m = emVideo && /^a=rtpmap:(\d+) (VP8|VP9|AV1|H264)\//i.exec(l);
+    if (m) tiposVideo.add(m[1]);
+  }
+  const comFmtp = new Set();
+  const saida = linhas.map((l) => {
+    const m = /^a=fmtp:(\d+) (.*)$/.exec(l);
+    if (!m || !tiposVideo.has(m[1])) return l;
+    comFmtp.add(m[1]);
+    return l.includes("x-google-start-bitrate") ? l : `${l};x-google-start-bitrate=${BITRATE_INICIAL_KBPS}`;
+  });
+  const final = [];
+  for (const l of saida) {
+    final.push(l);
+    const m = /^a=rtpmap:(\d+) /.exec(l);
+    if (m && tiposVideo.has(m[1]) && !comFmtp.has(m[1])) final.push(`a=fmtp:${m[1]} x-google-start-bitrate=${BITRATE_INICIAL_KBPS}`);
+  }
+  return { type: descricao.type, sdp: final.join("\r\n") };
+}
+
+// Ordena os codecs que o navegador suporta pela preferência da qualidade escolhida.
+function preferirCodecs(transceptor, q) {
+  if (!transceptor?.setCodecPreferences || !window.RTCRtpReceiver?.getCapabilities) return;
+  const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
+  const posicao = (c) => {
+    const nome = c.mimeType.split("/")[1].toUpperCase();
+    const i = q.codecs.indexOf(nome);
+    return i === -1 ? q.codecs.length : i; // RTX, RED e FEC vão para o fim, mas continuam na lista
+  };
+  try {
+    transceptor.setCodecPreferences([...codecs].sort((a, b) => posicao(a) - posicao(b)));
+  } catch (e) {
+    console.warn("Não foi possível escolher o codec", e);
+  }
 }
 
 let temporizadorToast = null;
@@ -121,7 +187,7 @@ function criarPar(id, nome) {
     try {
       par.criandoOferta = true;
       await pc.setLocalDescription();
-      sinal("sdp", pc.localDescription, id);
+      sinal("sdp", ajustarSdp(pc.localDescription), id);
     } catch (e) {
       console.warn("Erro ao negociar", e);
     } finally {
@@ -145,7 +211,13 @@ function criarPar(id, nome) {
 }
 
 function enviarTelaPara(par) {
-  par.envios = estado.minhaTela.getTracks().map((track) => ({ sender: par.pc.addTrack(track, estado.minhaTela), track }));
+  const q = qualidadeAtual();
+  par.envios = estado.minhaTela.getTracks().map((track) => {
+    const sender = par.pc.addTrack(track, estado.minhaTela);
+    // Precisa ser antes da negociação, que o addTrack só dispara na próxima volta do loop.
+    if (track.kind === "video") preferirCodecs(par.pc.getTransceivers().find((t) => t.sender === sender), q);
+    return { sender, track };
+  });
 }
 
 function removerPar(id) {
@@ -170,7 +242,7 @@ async function tratarSdp(id, descricao) {
   await pc.setRemoteDescription(descricao);
   if (descricao.type === "offer") {
     await pc.setLocalDescription();
-    sinal("sdp", pc.localDescription, id);
+    sinal("sdp", ajustarSdp(pc.localDescription), id);
   }
 }
 
@@ -302,8 +374,8 @@ function idDoPar(par) {
 // ---------- Plano B: tela via servidor (lado de quem compartilha) ----------
 function escolherMime() {
   const opcoes = estado.minhaTela.getAudioTracks().length
-    ? ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp9,opus", "video/webm"]
-    : ["video/webm;codecs=vp8", "video/webm;codecs=vp9", "video/webm"];
+    ? ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+    : ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
   return opcoes.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || null;
 }
 
@@ -373,7 +445,9 @@ async function ajustarQualidade() {
   const recebendo = [...estado.pares.entries()]
     .filter(([id, p]) => p.envios.length && !p.elePausou && !estado.gravacao?.assinantes.has(id))
     .map(([, p]) => p);
-  const porPessoa = Math.max(BITRATE_MINIMO, Math.min(q.maximo, q.orcamento / Math.max(1, recebendo.length)));
+  // Quem recebe via servidor também sai do meu upload (uma cópia da gravação, não importa quantos).
+  const orcamento = orcamentoUpload() - (viaServidor ? q.gravacao : 0);
+  const porPessoa = Math.max(BITRATE_MINIMO, Math.min(q.maximo, orcamento / Math.max(1, recebendo.length)));
 
   for (const par of recebendo) {
     for (const { sender, track } of par.envios) {
@@ -383,7 +457,18 @@ async function ajustarQualidade() {
         if (!p.encodings || !p.encodings.length) continue; // ainda negociando
         p.encodings[0].maxBitrate = Math.round(porPessoa);
         p.encodings[0].maxFramerate = q.fps;
-        await sender.setParameters(p);
+        p.encodings[0].scaleResolutionDownBy = 1;
+        p.encodings[0].priority = p.encodings[0].networkPriority = "high";
+        p.degradationPreference = q.degradacao;
+        try {
+          await sender.setParameters(p);
+        } catch {
+          // Navegadores mais antigos recusam degradationPreference/priority: tenta só o essencial.
+          delete p.degradationPreference;
+          delete p.encodings[0].priority;
+          delete p.encodings[0].networkPriority;
+          await sender.setParameters(p);
+        }
       } catch (e) {
         console.warn("Não foi possível ajustar o bitrate", e);
       }
@@ -402,7 +487,7 @@ async function aplicarQualidadeNaFaixa() {
   const q = qualidadeAtual();
   const video = tela.getVideoTracks()[0];
   video.contentHint = q.dica;
-  try { await video.applyConstraints({ height: { max: q.altura }, frameRate: { max: q.fps } }); } catch { /* nem todo navegador aceita */ }
+  try { await video.applyConstraints(restricoesDaTela(q)); } catch { /* nem todo navegador aceita */ }
   if (estado.gravacao?.assinantes.size) reiniciarGravacao();
   ajustarQualidade();
 }
@@ -555,7 +640,7 @@ async function compartilhar() {
   let tela;
   try {
     tela = await navigator.mediaDevices.getDisplayMedia({
-      video: { height: { max: q.altura }, frameRate: { max: q.fps } },
+      video: restricoesDaTela(q),
       audio: $("com-audio").checked,
     });
   } catch {
@@ -761,6 +846,14 @@ for (const [chave, q] of Object.entries(QUALIDADES)) {
 }
 $("sel-qualidade").value = QUALIDADES[lerLocal("qualidade")] ? lerLocal("qualidade") : "texto";
 $("sel-qualidade").addEventListener("change", () => { gravarLocal("qualidade", $("sel-qualidade").value); aplicarQualidadeNaFaixa(); });
+for (const mb of UPLOADS_MBPS) {
+  const op = document.createElement("option");
+  op.value = String(mb);
+  op.textContent = mb >= 300 ? "300+ Mbps" : `${mb} Mbps`;
+  $("sel-upload").appendChild(op);
+}
+$("sel-upload").value = UPLOADS_MBPS.includes(Number(lerLocal("upload"))) ? lerLocal("upload") : String(UPLOAD_PADRAO_MBPS);
+$("sel-upload").addEventListener("change", () => { gravarLocal("upload", $("sel-upload").value); ajustarQualidade(); });
 
 $("form-entrada").addEventListener("submit", (e) => { e.preventDefault(); mostrar($("erro-entrada"), false); entrar(); });
 $("btn-compartilhar").addEventListener("click", compartilhar);
