@@ -28,7 +28,9 @@ module.exports = [
       t.verificar(v.altura >= 720, "chega pelo menos em 720p", `${v.altura}p`);
       t.verificar(v.fps >= 25, "chega com pelo menos 25 fps", `${Math.round(v.fps)} fps`);
       t.verificar(await bia.isVisible(".selo.direto"), "a tela mostra o selo 'direto'");
-      t.verificar(/1080p|720p/.test(await bia.textContent(".selo.resolucao")), "o selo mostra a resolução real", await bia.textContent(".selo.resolucao"));
+      // O selo tem que mostrar resolução e fps (o valor exato varia com a máquina: numa fraca, o
+      // Full HD equilibrado pode baixar para 540p, e o selo deve mostrar isso mesmo).
+      t.verificar(/^(4K|\d{3,4}p) · \d+ fps/.test(await bia.textContent(".selo.resolucao")), "o selo mostra a resolução e o fps reais", await bia.textContent(".selo.resolucao"));
       await ana.click("#btn-compartilhar");
       await bia.waitForFunction(() => !document.querySelector(".bloco"), null, { timeout: 8000 });
       t.verificar(true, "parar de compartilhar some com a tela para os outros");
@@ -170,7 +172,12 @@ module.exports = [
       const tela = q.find((x) => !x.camera), cam = q.find((x) => x.camera);
       t.medir("Câmera recebida", `${cam.largura}×${cam.altura} (${cam.res})`);
       t.verificar(tela && cam, "tela e câmera juntas aparecem em dois quadros", JSON.stringify(q.map((x) => x.nome)));
-      t.verificar(tela.largura !== cam.largura || tela.altura !== cam.altura, "o quadro da tela mostra a tela e o da câmera mostra a câmera (não trocados)", `tela ${tela.largura}×${tela.altura}, câmera ${cam.largura}×${cam.altura}`);
+      // Cada quadro tem que estar ligado ao fluxo certo: compara o id do vídeo de cada quadro (na Bia)
+      // com o id que a Ana usou para a tela e para a câmera. (Não dá para comparar pelo tamanho:
+      // numa máquina fraca a tela pode baixar para 720p, o mesmo da câmera.)
+      const idsAna = await ana.evaluate(() => ({ tela: estado.fluxoEnvio.id, camera: estado.minhaCamera.id }));
+      const idsBia = await bia.evaluate(() => Object.fromEntries([...document.querySelectorAll(".bloco")].map((b) => [b.classList.contains("camera") ? "camera" : "tela", b.querySelector("video").srcObject?.id])));
+      t.verificar(idsBia.tela === idsAna.tela && idsBia.camera === idsAna.camera, "o quadro da tela mostra a tela e o da câmera mostra a câmera (não trocados)", `tela ${tela.largura}×${tela.altura}, câmera ${cam.largura}×${cam.altura}`);
       t.verificar(cam.altura <= 720 && cam.altura >= 360, "a câmera vai em até 720p", `${cam.altura}p`);
       // quem entra depois também vê
       const caio = await amb.pessoa("Caio");
