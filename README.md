@@ -12,14 +12,14 @@ num bloco separado, com botões de pausar, destacar e tela cheia.
 
 ## Instalar o app
 
-Baixe o instalador na página de [Releases](../../releases) (ou em **Actions → Gerar app →
-última execução → Artifacts**):
+Baixe o instalador na página de **[Releases](../../releases/latest)**:
 
 | Sistema | Arquivo |
 |---|---|
-| Windows | `CompartilhaTela-Instalador-*.exe` (instala e cria atalho) ou `CompartilhaTela-Portatil-*.exe` (roda sem instalar) |
+| Windows | `CompartilhaTela-Instalador-*.exe` (recomendado: instala, cria atalho e **se atualiza sozinho**) |
+| Windows (sem instalar) | `CompartilhaTela-Portatil-*.exe` (roda direto, mas não se atualiza sozinho) |
 | macOS | `CompartilhaTela-*-arm64.dmg` (Apple Silicon) ou `-x64.dmg` (Intel) |
-| Linux | `CompartilhaTela-*.AppImage` |
+| Linux | `CompartilhaTela-*.AppImage` (se atualiza sozinho) |
 
 O app **não tem assinatura de código**, então o sistema vai reclamar na primeira vez:
 
@@ -28,6 +28,20 @@ O app **não tem assinatura de código**, então o sistema vai reclamar na prime
   botão direito no app → **Abrir** → **Abrir**. Se disser que o app "está danificado", rode
   `xattr -cr "/Applications/Compartilha Tela.app"` no Terminal.
 - **Linux**: `chmod +x CompartilhaTela-*.AppImage` e abra.
+
+## Atualizações
+
+No **Windows (instalador)** e no **Linux**, o app procura versão nova ao abrir (e a cada 4 horas
+aberto). Quando acha, baixa em segundo plano e mostra um aviso no topo do painel. A atualização
+instala sozinha quando você fecha o app, ou na hora pelo botão **Reiniciar e atualizar agora**.
+
+No **Windows portátil** e no **macOS**, o painel avisa que há versão nova e o botão abre a
+página de download (o portátil é um .exe avulso, e o macOS só deixa um app se substituir sozinho
+se ele tiver assinatura).
+
+**Para lançar uma versão nova** (quem mantém o código): aumente `"version"` no `package.json` e
+faça push na `main`. O GitHub Actions gera os instaladores e publica a Release `v<versão>`
+sozinho. Push sem mudar a versão só gera os arquivos em Actions → Artifacts.
 
 ## Usar
 
@@ -120,16 +134,7 @@ npm run servidor
 amigos acessarem, rode o túnel à mão em outro terminal: `cloudflared tunnel --url http://localhost:3000`.
 
 Gerar o instalador localmente: `npm run dist:win`, `npm run dist:mac` ou `npm run dist:linux`
-(saem em `dist/`). Mas é mais fácil deixar o GitHub Actions gerar: todo push na `main` gera os três,
-e uma tag `v*` publica uma Release:
-
-```bash
-git tag v2.0.0
-```
-
-```bash
-git push origin v2.0.0
-```
+(saem em `dist/`). Para publicar uma versão, veja [Atualizações](#atualizações).
 
 ## Limitações
 

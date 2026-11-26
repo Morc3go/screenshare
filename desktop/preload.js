@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld("app", {
   definirSenha: (senha) => ipcRenderer.invoke("definir-senha", senha),
   definirSala: (sala) => ipcRenderer.invoke("definir-sala", sala),
   reiniciarTunel: () => ipcRenderer.invoke("reiniciar-tunel"),
+  atualizar: () => ipcRenderer.invoke("atualizar"),
   aoMudarEstado: (fn) => ipcRenderer.on("estado", (_e, estado) => fn(estado)),
 });

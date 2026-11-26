@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { iniciarServidor } = require("../server");
 const { Tunel } = require("./tunel");
+const { Atualizador } = require("./atualizador");
 
 const PORTA_PREFERIDA = 3000;
 
@@ -18,6 +19,7 @@ if (!app.requestSingleInstanceLock()) {
   let servidor = null;
   let tunel = null;
   let erroServidor = null;
+  const atualizador = new Atualizador();
   const arquivoConfig = () => path.join(app.getPath("userData"), "config.json");
   let config = { senha: "", sala: "geral" };
 
@@ -44,6 +46,7 @@ if (!app.requestSingleInstanceLock()) {
       senha: config.senha,
       sala: config.sala,
       versao: app.getVersion(),
+      atualizacao: atualizador.estado,
     };
   }
   function avisarPainel() {
@@ -131,6 +134,7 @@ if (!app.requestSingleInstanceLock()) {
     avisarPainel();
   });
   ipcMain.handle("reiniciar-tunel", () => tunel?.reiniciar());
+  ipcMain.handle("atualizar", () => atualizador.agir());
 
   app.on("second-instance", () => {
     if (janela) {
@@ -143,6 +147,8 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null);
     carregarConfig();
     criarJanela();
+    atualizador.on("estado", avisarPainel);
+    atualizador.iniciar();
     await ligar();
   });
 

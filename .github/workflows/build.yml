@@ -1,14 +1,16 @@
-# Gera os instaladores do app (sem assinatura de código) para Windows, macOS e Linux.
+# Gera os instaladores do app (sem assinatura de código) para Windows, macOS e Linux e
+# publica uma Release quando a versão do package.json muda.
 #
-# - A cada push na main: os arquivos ficam em Actions > (execução) > Artifacts.
-# - Ao criar uma tag v* (ex.: git tag v2.0.0 && git push origin v2.0.0): também
-#   publica uma Release com os instaladores para baixar.
+# O app instalado procura atualizações nas Releases (electron-updater): por isso cada Release
+# leva, além dos instaladores, os arquivos latest*.yml e *.blockmap.
+#
+# Para lançar uma versão: aumente "version" no package.json e faça push na main.
+# Push sem mudar a versão só gera os arquivos em Actions > Artifacts.
 name: Gerar app
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -52,20 +54,44 @@ jobs:
           path: |
             dist/*.exe
             dist/*.dmg
+            dist/*.zip
             dist/*.AppImage
+            dist/*.blockmap
+            dist/latest*.yml
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Ver se esta versão já foi lançada
+        id: versao
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          versao="v$(node -p "require('./package.json').version")"
+          echo "tag=$versao" >> "$GITHUB_OUTPUT"
+          if gh release view "$versao" >/dev/null 2>&1; then
+            echo "Release $versao já existe; nada a publicar."
+            echo "nova=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "nova=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/download-artifact@v4
+        if: steps.versao.outputs.nova == 'true'
         with:
           path: instaladores
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: instaladores/*
-          generate_release_notes: true
+      - name: Publicar Release
+        if: steps.versao.outputs.nova == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.versao.outputs.tag }}" instaladores/* \
+            --target "${{ github.sha }}" \
+            --title "Compartilha Tela ${{ steps.versao.outputs.tag }}" \
+            --generate-notes

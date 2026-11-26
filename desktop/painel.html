@@ -40,12 +40,18 @@
   li .ao-vivo { color: var(--perigo); }
   a { color: var(--destaque); }
   .oculto { display: none !important; }
+  .atualizacao { border-color: var(--destaque); }
   label { display: block; font-weight: 600; margin-bottom: 6px; }
 </style>
 </head>
 <body>
 <main>
   <h1>Compartilha Tela</h1>
+
+  <section class="cartao atualizacao oculto" id="cartao-atualizacao">
+    <div class="status"><span class="ponto" id="ponto-atualizacao"></span><span id="txt-atualizacao"></span></div>
+    <button id="btn-atualizar" class="oculto" style="margin-top:12px"></button>
+  </section>
 
   <section class="cartao">
     <h2>Link para os amigos</h2>
@@ -129,11 +135,39 @@ function desenhar(e) {
     lista.appendChild(li);
   }
 
+  desenharAtualizacao(e.atualizacao || { fase: "desligado" });
+
   if (document.activeElement !== $("campo-senha")) $("campo-senha").value = e.senha || "";
   if (document.activeElement !== $("campo-sala")) $("campo-sala").value = e.sala || "";
+  const notaVersao = { verificando: " (procurando atualização…)", atualizado: " (atualizada)" }[e.atualizacao?.fase] || "";
   $("txt-rodape").textContent = (e.portaLocal ? "Servidor local na porta " + e.portaLocal + " · " : "") + "versão " + e.versao +
-    " · fechar esta janela desliga tudo.";
+    notaVersao + " · fechar esta janela desliga tudo.";
 }
+
+// Só aparece quando há algo a fazer ou acontecendo; "atualizado"/"erro" ficam no rodapé.
+function desenharAtualizacao(a) {
+  const cartao = $("cartao-atualizacao");
+  const btn = $("btn-atualizar");
+  const visivel = ["baixando", "pronto", "disponivel"].includes(a.fase);
+  mostrar(cartao, visivel);
+  if (!visivel) return;
+  if (a.fase === "baixando") {
+    $("ponto-atualizacao").className = "ponto espera";
+    $("txt-atualizacao").textContent = `Baixando a versão ${a.versao}… ${a.progresso ?? 0}%`;
+    mostrar(btn, false);
+  } else if (a.fase === "pronto") {
+    $("ponto-atualizacao").className = "ponto ok";
+    $("txt-atualizacao").textContent = `Versão ${a.versao} pronta. Instala sozinha quando você fechar o app.`;
+    btn.textContent = "Reiniciar e atualizar agora";
+    mostrar(btn, true);
+  } else {
+    $("ponto-atualizacao").className = "ponto ok";
+    $("txt-atualizacao").textContent = `Versão ${a.versao} disponível.`;
+    btn.textContent = "Baixar a nova versão";
+    mostrar(btn, true);
+  }
+}
+$("btn-atualizar").addEventListener("click", () => window.app.atualizar());
 
 $("btn-copiar").addEventListener("click", async () => {
   if (await window.app.copiarLink()) {
