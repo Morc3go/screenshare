@@ -66,6 +66,22 @@ para cada pessoa que está assistindo. Para isso caber no upload de uma internet
 
 Várias pessoas compartilhando ao mesmo tempo funciona. O limite é o upload de cada uma, não o app.
 
+## Quando a conexão direta não funciona ("via servidor")
+
+O normal é o vídeo ir direto de um navegador para o outro, com o selo verde **direto** na tela.
+Mas várias redes bloqueiam essa conexão direta, principalmente internet de operadora com CGNAT,
+4G e redes de empresa ou faculdade. Nesse caso o site espera uns 7 segundos e passa sozinho para
+o modo **via servidor** (selo amarelo):
+
+- quem compartilha grava a tela em pedaços de vídeo e manda pelo mesmo canal que já liga ao
+  seu app (o túnel). O seu PC repassa para quem precisa;
+- tem cerca de 1 a 2 segundos de atraso, mas funciona em qualquer rede que abra o site;
+- se a conexão direta voltar a funcionar, a tela volta sozinha para **direto**;
+- nesse modo o vídeo passa pelo PC de quem está com o app aberto, então gasta o upload dele
+  (cerca de 1,5 Mbps por pessoa nesse modo, na qualidade "Texto nítido").
+
+Para testar o modo via servidor de propósito, abra a sala com `?so_servidor=1` no fim do link.
+
 ## Rodar pelo código (desenvolvimento)
 
 Precisa do [Node.js](https://nodejs.org) 18 ou mais novo.
@@ -103,9 +119,8 @@ git push origin v2.0.0
 
 - **Link de túnel grátis**: o `trycloudflare.com` não tem garantia de disponibilidade. Se ele
   cair, o app tenta de novo sozinho, e há o botão **Reiniciar túnel** (o link muda).
-- **Redes muito restritivas**: em algumas redes (corporativas, 4G com CGNAT duplo) a conexão
-  direta entre navegadores não fecha. Para esses casos seria preciso um servidor TURN, que dá
-  para adicionar em `ICE` no topo de `public/app.js`.
+- **Modo via servidor no Safari**: o Safari (iPhone/Mac) não toca o vídeo nesse modo. Quem
+  estiver numa rede que bloqueia a conexão direta precisa usar Chrome, Edge ou Firefox.
 - **Mais de 10 pessoas**: a malha começa a pesar no upload de quem compartilha. Para salas
   maiores o caminho seria um SFU (um servidor que recebe uma cópia e redistribui).
 

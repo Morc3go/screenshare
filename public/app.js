@@ -8,17 +8,32 @@
 //   - o bitrate de cada envio é o orçamento total dividido pelo número de quem está assistindo;
 //   - quem assiste pode pausar uma tela, e aí quem compartilha para de enviar para essa pessoa
 //     (replaceTrack(null), sem renegociar), liberando banda para os outros.
+//
+// Plano B — "via servidor": a conexão direta entre dois navegadores falha em várias redes
+// (CGNAT de operadora, 4G, firewall). Se ela não fechar em alguns segundos, quem assiste pede a
+// tela retransmitida pelo servidor: quem compartilha grava a tela em pedaços WebM
+// (MediaRecorder) e manda pelo mesmo WebSocket da sinalização, que já funciona pelo túnel;
+// quem assiste toca com MediaSource. Tem uns 1–2 s de atraso, mas sempre funciona.
 
 const ICE = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }];
+// ?so_servidor=1 impede a conexão direta, para testar o plano B.
+const FORCAR_SERVIDOR = new URLSearchParams(location.search).has("so_servidor");
 
 // orcamento: upload total que a tela pode usar (bits/s), dividido entre quem assiste.
+// gravacao: bitrate do plano B (uma cópia só; o servidor é quem replica).
 const QUALIDADES = {
-  texto:     { nome: "Texto nítido (código, documentos)", altura: 1080, fps: 15, dica: "detail", orcamento: 8e6,  maximo: 2.5e6 },
-  equilibrado:{ nome: "Equilibrado",                       altura: 1080, fps: 30, dica: "detail", orcamento: 10e6, maximo: 3e6 },
-  movimento: { nome: "Vídeos e jogos (mais fluido)",       altura: 720,  fps: 30, dica: "motion", orcamento: 10e6, maximo: 3e6 },
-  leve:      { nome: "Internet fraca",                     altura: 720,  fps: 10, dica: "detail", orcamento: 3e6,  maximo: 1e6 },
+  texto:       { nome: "Texto nítido (código, documentos)", altura: 1080, fps: 15, dica: "detail", orcamento: 8e6,  maximo: 2.5e6, gravacao: 1.5e6 },
+  equilibrado: { nome: "Equilibrado",                       altura: 1080, fps: 30, dica: "detail", orcamento: 10e6, maximo: 3e6,   gravacao: 2e6 },
+  movimento:   { nome: "Vídeos e jogos (mais fluido)",      altura: 720,  fps: 30, dica: "motion", orcamento: 10e6, maximo: 3e6,   gravacao: 2e6 },
+  leve:        { nome: "Internet fraca",                    altura: 720,  fps: 10, dica: "detail", orcamento: 3e6,  maximo: 1e6,   gravacao: 0.6e6 },
 };
 const BITRATE_MINIMO = 250e3;
+const ESPERA_CONEXAO_DIRETA_MS = 7000;
+const FATIA_GRAVACAO_MS = 250;
+// Plano B: toca ~1 s atrás do "ao vivo" para ter folga contra oscilação; se acumular mais que
+// ATRASO_MAXIMO_S (aba em segundo plano, rede lenta), pula de volta para perto do ao vivo.
+const FOLGA_RELAY_S = 1.0;
+const ATRASO_MAXIMO_S = 3.0;
 
 const $ = (id) => document.getElementById(id);
 const mostrar = (el, sim) => el.classList.toggle("oculto", !sim);
@@ -33,10 +48,13 @@ const estado = {
   saindo: false,        // saída voluntária: não reconecta
   minhaTela: null,      // MediaStream da minha tela
   destaque: null,       // chave do bloco ampliado
+  gravacao: null,       // plano B do meu lado: { recorder, mime, assinantes:Set, fila:Promise }
   pares: new Map(),
   // id -> { pc, nome, polido, criandoOferta, ignorarOferta,
   //         fluxo, compartilhando,          (a tela DELE)
   //         euPausei,                       (eu não quero ver a tela dele)
+  //         desdeFalha,                     (quando a conexão direta começou a não funcionar)
+  //         relay: null | { ms, sb, url, fila, mime },  (tela dele chegando via servidor)
   //         envios: [{sender, track}],      (minha tela indo para ele)
   //         elePausou }                     (ele não quer ver a minha)
 };
@@ -55,12 +73,43 @@ function qualidadeAtual() {
   return QUALIDADES[$("sel-qualidade").value] || QUALIDADES.texto;
 }
 
+let temporizadorToast = null;
+function toast(texto) {
+  const el = $("aviso-flutuante");
+  el.textContent = texto;
+  el.classList.add("visivel");
+  clearTimeout(temporizadorToast);
+  temporizadorToast = setTimeout(() => el.classList.remove("visivel"), 2200);
+}
+
+function corDoNome(nome) {
+  let h = 0;
+  for (const c of nome) h = (h * 31 + c.codePointAt(0)) % 360;
+  return `hsl(${h} 65% 50%)`;
+}
+function avatar(nome) {
+  const el = document.createElement("span");
+  el.className = "avatar";
+  el.style.background = corDoNome(nome);
+  el.textContent = (nome.trim()[0] || "?").toUpperCase();
+  return el;
+}
+function icone(nome) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  const use = document.createElementNS(ns, "use");
+  use.setAttribute("href", "#i-" + nome);
+  svg.appendChild(use);
+  return svg;
+}
+
 // ---------- Conexões com os outros ----------
 function criarPar(id, nome) {
   if (estado.pares.has(id)) return estado.pares.get(id);
-  const pc = new RTCPeerConnection({ iceServers: ICE });
+  const pc = new RTCPeerConnection(FORCAR_SERVIDOR ? { iceServers: [], iceTransportPolicy: "relay" } : { iceServers: ICE });
   const par = {
-    pc, nome, fluxo: null, compartilhando: false, euPausei: false, envios: [], elePausou: false,
+    pc, nome, fluxo: null, compartilhando: false, euPausei: false, desdeFalha: null, relay: null,
+    envios: [], elePausou: false,
     // Um lado precisa ceder quando os dois mandam oferta ao mesmo tempo; a ordem dos ids decide.
     polido: estado.meuId < id,
     criandoOferta: false, ignorarOferta: false,
@@ -83,6 +132,7 @@ function criarPar(id, nome) {
   pc.onsignalingstatechange = () => { if (pc.signalingState === "stable") ajustarQualidade(); };
   pc.ontrack = ({ track, streams }) => {
     par.fluxo = streams[0] || new MediaStream([track]);
+    track.onunmute = () => desenharBlocos();
     if (par.compartilhando) desenharBlocos();
   };
   pc.onconnectionstatechange = () => {
@@ -102,7 +152,9 @@ function removerPar(id) {
   const par = estado.pares.get(id);
   if (!par) return;
   par.pc.close();
+  fecharRelay(par);
   estado.pares.delete(id);
+  removerAssinante(id);
   if (estado.destaque === id) estado.destaque = null;
   desenharPessoas();
   desenharBlocos();
@@ -143,12 +195,184 @@ async function tratarPedidoAssistir(id, ativo) {
   ajustarQualidade();
 }
 
+// A conexão direta com quem compartilha está entregando vídeo?
+function conexaoDiretaOk(par) {
+  return par.pc.connectionState === "connected" && Boolean(par.fluxo) &&
+    par.fluxo.getVideoTracks().some((t) => t.readyState === "live" && !t.muted);
+}
+
+// Roda a cada 2 s: decide, para cada tela que eu estou vendo, se vai direto ou via servidor.
+function verificarConexoes() {
+  const agora = Date.now();
+  for (const [id, par] of estado.pares) {
+    if (!par.compartilhando || par.euPausei) {
+      par.desdeFalha = null;
+      if (par.relay) desligarRelay(id, par);
+      continue;
+    }
+    if (conexaoDiretaOk(par)) {
+      par.desdeFalha = null;
+      if (par.relay) { desligarRelay(id, par); desenharBlocos(); }
+      continue;
+    }
+    par.desdeFalha ??= agora;
+    if (!par.relay && agora - par.desdeFalha > ESPERA_CONEXAO_DIRETA_MS) ligarRelay(id, par);
+  }
+}
+
+// ---------- Plano B: tela via servidor (lado de quem assiste) ----------
+function ligarRelay(id, par) {
+  par.relay = { ms: null, sb: null, url: null, fila: [], mime: null };
+  sinal("relay", { ativo: true }, id);
+  desenharBlocos();
+}
+
+function desligarRelay(id, par) {
+  sinal("relay", { ativo: false }, id);
+  fecharRelay(par);
+}
+
+function fecharRelay(par) {
+  if (!par.relay) return;
+  if (par.relay.url) URL.revokeObjectURL(par.relay.url);
+  par.relay = null;
+}
+
+// Quem compartilha (re)começou a gravação: começa um MediaSource novo.
+function iniciarFluxoRelay(par, mime) {
+  if (!par.relay) return;
+  if (!window.MediaSource || !MediaSource.isTypeSupported(mime)) {
+    par.relay.semSuporte = true;
+    desenharBlocos();
+    return;
+  }
+  if (par.relay.url) URL.revokeObjectURL(par.relay.url);
+  const ms = new MediaSource();
+  Object.assign(par.relay, { ms, sb: null, fila: [], mime, url: URL.createObjectURL(ms) });
+  ms.addEventListener("sourceopen", () => {
+    if (par.relay?.ms !== ms) return;
+    const sb = ms.addSourceBuffer(mime);
+    sb.mode = "sequence";
+    sb.addEventListener("updateend", () => alimentarRelay(par));
+    par.relay.sb = sb;
+    alimentarRelay(par);
+  }, { once: true });
+  desenharBlocos();
+}
+
+function receberPedacoRelay(dados) {
+  const id = new TextDecoder().decode(new Uint8Array(dados, 0, 36));
+  const par = estado.pares.get(id);
+  if (!par?.relay?.ms) return;
+  par.relay.fila.push(dados.slice(36));
+  alimentarRelay(par);
+}
+
+function alimentarRelay(par) {
+  const r = par.relay;
+  if (!r?.sb || r.sb.updating || r.ms.readyState !== "open") return;
+  const video = document.querySelector(`[data-chave="${CSS.escape(idDoPar(par))}"] video`);
+  if (video && r.sb.buffered.length) {
+    const fim = r.sb.buffered.end(r.sb.buffered.length - 1);
+    const folga = fim - video.currentTime;
+    if (folga > ATRASO_MAXIMO_S) video.currentTime = fim - FOLGA_RELAY_S;
+    // Só (re)começa a tocar com folga no buffer; tocar colado na borda faz o player travar a cada pedaço.
+    if (video.paused && folga >= FOLGA_RELAY_S) video.play().catch(() => {});
+    // Descarta o que já passou para não encher a memória.
+    const inicio = r.sb.buffered.start(0);
+    if (video.currentTime - inicio > 30) { r.sb.remove(inicio, video.currentTime - 10); return; }
+  }
+  const pedaco = r.fila.shift();
+  if (!pedaco) return;
+  try {
+    r.sb.appendBuffer(pedaco);
+  } catch (e) {
+    console.warn("Pedaço de vídeo rejeitado; pedindo para recomeçar", e);
+    const id = idDoPar(par);
+    desligarRelay(id, par);
+    ligarRelay(id, par);
+  }
+}
+
+function idDoPar(par) {
+  for (const [id, p] of estado.pares) if (p === par) return id;
+  return "";
+}
+
+// ---------- Plano B: tela via servidor (lado de quem compartilha) ----------
+function escolherMime() {
+  const opcoes = estado.minhaTela.getAudioTracks().length
+    ? ["video/webm;codecs=vp8,opus", "video/webm;codecs=vp9,opus", "video/webm"]
+    : ["video/webm;codecs=vp8", "video/webm;codecs=vp9", "video/webm"];
+  return opcoes.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || null;
+}
+
+// Cada assinante novo precisa do começo do arquivo WebM (cabeçalho + quadro-chave), então a
+// gravação recomeça e todos os assinantes reiniciam o player. Acontece só quando alguém novo cai
+// no plano B, então o "piscar" é raro.
+function reiniciarGravacao() {
+  pararGravacao(false);
+  const g = estado.gravacao;
+  if (!estado.minhaTela || !g || !g.assinantes.size) return;
+  const mime = escolherMime();
+  if (!mime) {
+    console.warn("Este navegador não grava a tela em WebM; plano B indisponível");
+    return;
+  }
+  const recorder = new MediaRecorder(estado.minhaTela, {
+    mimeType: mime,
+    videoBitsPerSecond: qualidadeAtual().gravacao,
+    audioBitsPerSecond: 96e3,
+  });
+  g.recorder = recorder;
+  g.mime = mime;
+  for (const id of g.assinantes) sinal("relay-inicio", { mime }, id);
+  recorder.ondataavailable = (ev) => {
+    if (!ev.data.size || g.recorder !== recorder) return;
+    // arrayBuffer() é assíncrono: a fila garante que os pedaços saem na ordem certa.
+    g.fila = g.fila.then(async () => {
+      const buf = await ev.data.arrayBuffer();
+      if (g.recorder === recorder && estado.ws?.readyState === WebSocket.OPEN) estado.ws.send(buf);
+    });
+  };
+  recorder.start(FATIA_GRAVACAO_MS);
+}
+
+function pararGravacao(limparAssinantes) {
+  const g = estado.gravacao;
+  if (!g) return;
+  if (g.recorder && g.recorder.state !== "inactive") g.recorder.stop();
+  g.recorder = null;
+  if (limparAssinantes) g.assinantes.clear();
+}
+
+function tratarPedidoRelay(id, ativo) {
+  estado.gravacao ??= { recorder: null, mime: null, assinantes: new Set(), fila: Promise.resolve() };
+  const g = estado.gravacao;
+  if (ativo) {
+    g.assinantes.add(id);
+    reiniciarGravacao();
+  } else {
+    removerAssinante(id);
+  }
+  ajustarQualidade();
+}
+
+function removerAssinante(id) {
+  const g = estado.gravacao;
+  if (!g || !g.assinantes.delete(id)) return;
+  if (!g.assinantes.size) pararGravacao(false);
+}
+
 // ---------- Qualidade adaptativa ----------
 async function ajustarQualidade() {
   const info = $("info-envio");
   if (!estado.minhaTela) { info.textContent = ""; return; }
   const q = qualidadeAtual();
-  const recebendo = [...estado.pares.values()].filter((p) => p.envios.length && !p.elePausou);
+  const viaServidor = estado.gravacao?.assinantes.size || 0;
+  const recebendo = [...estado.pares.entries()]
+    .filter(([id, p]) => p.envios.length && !p.elePausou && !estado.gravacao?.assinantes.has(id))
+    .map(([, p]) => p);
   const porPessoa = Math.max(BITRATE_MINIMO, Math.min(q.maximo, q.orcamento / Math.max(1, recebendo.length)));
 
   for (const par of recebendo) {
@@ -166,9 +390,10 @@ async function ajustarQualidade() {
     }
   }
   const n = recebendo.length;
-  info.textContent = n === 0
-    ? "Ninguém assistindo sua tela agora"
-    : `Enviando para ${n} ${n === 1 ? "pessoa" : "pessoas"} · até ${mbps(porPessoa)} cada · ${mbps(porPessoa * n)} no total`;
+  const partes = [];
+  if (n) partes.push(`${n} ${n === 1 ? "pessoa" : "pessoas"} direto · até ${mbps(porPessoa)} cada`);
+  if (viaServidor) partes.push(`${viaServidor} via servidor`);
+  info.textContent = partes.length ? "Assistindo você: " + partes.join(" · ") : "Ninguém assistindo sua tela ainda";
 }
 
 async function aplicarQualidadeNaFaixa() {
@@ -178,6 +403,7 @@ async function aplicarQualidadeNaFaixa() {
   const video = tela.getVideoTracks()[0];
   video.contentHint = q.dica;
   try { await video.applyConstraints({ height: { max: q.altura }, frameRate: { max: q.fps } }); } catch { /* nem todo navegador aceita */ }
+  if (estado.gravacao?.assinantes.size) reiniciarGravacao();
   ajustarQualidade();
 }
 
@@ -201,6 +427,7 @@ function conectar(reconectando) {
   const q = new URLSearchParams({ sala: estado.sala, nome: estado.nome, senha: estado.senha });
   const protocolo = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${protocolo}//${location.host}/ws?${q}`);
+  ws.binaryType = "arraybuffer";
   estado.ws = ws;
   let entrou = false, recusado = false;
 
@@ -220,6 +447,7 @@ function conectar(reconectando) {
       estado.maxPorSala = maxPorSala || estado.maxPorSala;
       // Reconexão gera um id novo: descarta as conexões antigas.
       for (const pid of [...estado.pares.keys()]) removerPar(pid);
+      pararGravacao(true);
       estado.meuId = id;
       for (const p of participantes) {
         const par = criarPar(p.id, p.nome);
@@ -233,17 +461,35 @@ function conectar(reconectando) {
       criarPar(id, nome);
       if (estado.minhaTela) sinal("estado", { compartilhando: true }, id);
       desenharPessoas();
+      toast(`${nome} entrou na sala`);
     },
-    saiu({ id }) { removerPar(id); },
+    saiu({ id }) {
+      const nome = estado.pares.get(id)?.nome;
+      removerPar(id);
+      if (nome) toast(`${nome} saiu`);
+    },
     async sinal({ de, tipo, dados }) {
       if (tipo === "sdp") await tratarSdp(de, dados);
       else if (tipo === "ice") await tratarIce(de, dados);
       else if (tipo === "assistir") await tratarPedidoAssistir(de, Boolean(dados && dados.ativo));
-      else if (tipo === "estado") {
+      else if (tipo === "relay") tratarPedidoRelay(de, Boolean(dados && dados.ativo));
+      else if (tipo === "relay-inicio") {
+        const par = estado.pares.get(de);
+        if (par && typeof dados?.mime === "string") iniciarFluxoRelay(par, dados.mime);
+      } else if (tipo === "relay-atrasado") {
+        // O servidor cortou porque eu estava baixando devagar: pede de novo.
+        const par = estado.pares.get(de);
+        if (par?.relay) { fecharRelay(par); ligarRelay(de, par); }
+      } else if (tipo === "estado") {
         const par = estado.pares.get(de);
         if (!par) return;
+        const antes = par.compartilhando;
         par.compartilhando = Boolean(dados && dados.compartilhando);
-        if (!par.compartilhando) par.euPausei = false; // próxima vez começa assistindo
+        if (!par.compartilhando) {
+          par.euPausei = false; // próxima vez começa assistindo
+          if (par.relay) desligarRelay(de, par);
+        }
+        if (!antes && par.compartilhando) toast(`${par.nome} começou a compartilhar`);
         desenharPessoas();
         desenharBlocos();
       }
@@ -251,6 +497,7 @@ function conectar(reconectando) {
   };
 
   ws.onmessage = async (ev) => {
+    if (typeof ev.data !== "string") { receberPedacoRelay(ev.data); return; }
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
     try { await ao[msg.evento]?.(msg); } catch (e) { console.warn("Erro ao tratar mensagem", e); }
@@ -258,8 +505,8 @@ function conectar(reconectando) {
   ws.onclose = () => {
     if (estado.ws !== ws || estado.saindo || recusado) return;
     if (!entrou && !reconectando) { erroEntrada("Não foi possível conectar ao servidor."); return; }
-    // Estava na sala: avisa e tenta de novo. As conexões de vídeo diretas podem até continuar vivas,
-    // mas sem sinalização ninguém novo consegue entrar, então refazemos tudo.
+    // Estava na sala: avisa e tenta de novo. Sem sinalização ninguém novo consegue entrar
+    // (e o plano B para), então refazemos tudo.
     mostrar($("aviso-conexao"), true);
     setTimeout(() => { if (!estado.saindo && estado.ws === ws) conectar(true); }, 2000);
   };
@@ -268,7 +515,7 @@ function conectar(reconectando) {
 function abrirSala() {
   $("txt-sala").textContent = estado.sala;
   const url = new URL(location.href);
-  url.search = "?sala=" + encodeURIComponent(estado.sala);
+  url.search = "?sala=" + encodeURIComponent(estado.sala) + (FORCAR_SERVIDOR ? "&so_servidor=1" : "");
   history.replaceState(null, "", url);
   mostrar($("tela-entrada"), false);
   mostrar($("tela-sala"), true);
@@ -281,17 +528,27 @@ function sair() {
   pararCompartilhar();
   estado.ws?.close();
   estado.ws = null;
-  mostrar($("aviso-conexao"), false);
   for (const id of [...estado.pares.keys()]) removerPar(id);
+  mostrar($("aviso-conexao"), false);
   mostrar($("tela-sala"), false);
   mostrar($("tela-entrada"), true);
 }
 
 // ---------- Compartilhar ----------
+function atualizarBotaoCompartilhar() {
+  const btn = $("btn-compartilhar");
+  const ativo = Boolean(estado.minhaTela);
+  btn.classList.toggle("primario", !ativo);
+  btn.classList.toggle("perigo", ativo);
+  btn.replaceChildren(icone(ativo ? "parar" : "tela"), Object.assign(document.createElement("span"), {
+    textContent: ativo ? "Parar de compartilhar" : "Compartilhar minha tela",
+  }));
+}
+
 async function compartilhar() {
   if (estado.minhaTela) return pararCompartilhar();
   if (!navigator.mediaDevices?.getDisplayMedia) {
-    alert("Este navegador não deixa compartilhar a tela aqui. Use Chrome, Edge ou Firefox no computador, e abra o site pelo link HTTPS (ou localhost).");
+    toast("Este navegador não deixa compartilhar a tela aqui. Use Chrome, Edge ou Firefox no computador.");
     return;
   }
   const q = qualidadeAtual();
@@ -310,8 +567,7 @@ async function compartilhar() {
   tela.getVideoTracks()[0].addEventListener("ended", pararCompartilhar);
   for (const par of estado.pares.values()) { par.elePausou = false; enviarTelaPara(par); }
   sinal("estado", { compartilhando: true });
-  $("btn-compartilhar").textContent = "Parar de compartilhar";
-  $("btn-compartilhar").classList.add("perigo");
+  atualizarBotaoCompartilhar();
   desenharPessoas();
   desenharBlocos();
   ajustarQualidade();
@@ -320,6 +576,7 @@ async function compartilhar() {
 function pararCompartilhar() {
   const tela = estado.minhaTela;
   if (!tela) return;
+  pararGravacao(true);
   estado.minhaTela = null;
   tela.getTracks().forEach((t) => t.stop());
   for (const par of estado.pares.values()) {
@@ -331,8 +588,7 @@ function pararCompartilhar() {
   }
   if (estado.destaque === "eu") estado.destaque = null;
   sinal("estado", { compartilhando: false });
-  $("btn-compartilhar").textContent = "Compartilhar minha tela";
-  $("btn-compartilhar").classList.remove("perigo");
+  atualizarBotaoCompartilhar();
   desenharPessoas();
   desenharBlocos();
   ajustarQualidade();
@@ -343,6 +599,7 @@ function alternarPausa(id) {
   if (!par) return;
   par.euPausei = !par.euPausei;
   sinal("assistir", { ativo: !par.euPausei }, id);
+  if (par.euPausei && par.relay) desligarRelay(id, par);
   desenharBlocos();
 }
 
@@ -350,78 +607,134 @@ function alternarPausa(id) {
 function desenharPessoas() {
   const lista = $("lista-pessoas");
   lista.replaceChildren();
-  const pessoas = [{ nome: estado.nome + " (você)", aoVivo: Boolean(estado.minhaTela) }];
-  for (const par of estado.pares.values()) pessoas.push({ nome: par.nome, aoVivo: par.compartilhando });
+  const pessoas = [{ nome: estado.nome, rotulo: estado.nome + " (você)", aoVivo: Boolean(estado.minhaTela) }];
+  for (const par of estado.pares.values()) pessoas.push({ nome: par.nome, rotulo: par.nome, aoVivo: par.compartilhando });
   for (const p of pessoas) {
     const el = document.createElement("span");
     el.className = "pessoa" + (p.aoVivo ? " ao-vivo" : "");
-    el.textContent = p.nome;
+    el.append(avatar(p.nome), document.createTextNode(p.rotulo));
+    if (p.aoVivo) {
+      const selo = document.createElement("span");
+      selo.className = "selo vivo";
+      selo.textContent = "AO VIVO";
+      el.appendChild(selo);
+    }
     lista.appendChild(el);
   }
   $("txt-lotacao").textContent = `${pessoas.length}/${estado.maxPorSala}`;
 }
 
-function botao(texto, aoClicar) {
+function botaoIcone(nomeIcone, titulo, aoClicar) {
   const b = document.createElement("button");
   b.type = "button";
-  b.textContent = texto;
+  b.title = titulo;
+  b.setAttribute("aria-label", titulo);
+  b.appendChild(icone(nomeIcone));
   b.addEventListener("click", (e) => { e.stopPropagation(); aoClicar(); });
   return b;
 }
 
 function criarBloco(chave) {
   const bloco = document.createElement("div");
-  bloco.className = "bloco";
+  bloco.className = "bloco" + (chave === "eu" ? " minha" : "");
   bloco.dataset.chave = chave;
   const video = document.createElement("video");
   video.autoplay = true;
   video.playsInline = true;
-  const etiqueta = document.createElement("div");
-  etiqueta.className = "rotulo";
-  const pausado = document.createElement("div");
-  pausado.className = "pausado";
+  // Plano B: se o buffer esvaziou, pausa e deixa alimentarRelay() retomar quando houver folga.
+  video.addEventListener("waiting", () => { if (video.dataset.url) video.pause(); });
+  const legenda = document.createElement("div");
+  legenda.className = "legenda";
+  const sobre = document.createElement("div");
+  sobre.className = "sobreposicao oculto";
+  sobre.addEventListener("click", () => { if (estado.pares.get(chave)?.euPausei) alternarPausa(chave); });
   const acoes = document.createElement("div");
   acoes.className = "acoes-bloco";
-  const btnPausa = botao("Pausar", () => alternarPausa(chave));
-  btnPausa.classList.add("btn-pausa");
-  if (chave === "eu") btnPausa.classList.add("oculto");
+  if (chave !== "eu") {
+    const b = botaoIcone("pausa", "Pausar esta tela", () => alternarPausa(chave));
+    b.classList.add("btn-pausa");
+    acoes.appendChild(b);
+  }
   acoes.append(
-    btnPausa,
-    botao("Destacar", () => { estado.destaque = estado.destaque === chave ? null : chave; desenharBlocos(); }),
-    botao("Tela cheia", () => (document.fullscreenElement ? document.exitFullscreen() : bloco.requestFullscreen?.())),
+    botaoIcone("ampliar", "Destacar", () => { estado.destaque = estado.destaque === chave ? null : chave; desenharBlocos(); }),
+    botaoIcone("cheia", "Tela cheia", () => (document.fullscreenElement ? document.exitFullscreen() : bloco.requestFullscreen?.())),
   );
-  pausado.addEventListener("click", () => { if (estado.pares.get(chave)?.euPausei) alternarPausa(chave); });
-  bloco.append(video, etiqueta, pausado, acoes);
+  bloco.append(video, legenda, sobre, acoes);
   return bloco;
 }
 
 function atualizarBloco(bloco, d) {
   const video = bloco.querySelector("video");
-  if (video.srcObject !== d.fluxo) {
-    video.srcObject = d.fluxo;
-    video.muted = d.eu;
-    video.controls = !d.eu; // dá a quem assiste o controle de volume do áudio compartilhado
-    video.play().catch(() => {});
+  // Fonte do vídeo: fluxo WebRTC (srcObject) ou, no plano B, o MediaSource (src).
+  if (d.url) {
+    if (video.srcObject) video.srcObject = null;
+    if (video.dataset.url !== d.url) {
+      video.dataset.url = d.url;
+      video.autoplay = false; // quem dá o play é alimentarRelay(), quando houver folga
+      video.src = d.url;
+    }
+  } else {
+    if (video.dataset.url) { delete video.dataset.url; video.removeAttribute("src"); video.load(); video.autoplay = true; }
+    if (video.srcObject !== d.fluxo) {
+      video.srcObject = d.fluxo;
+      video.play().catch(() => {});
+    }
   }
-  bloco.querySelector(".rotulo").textContent = d.rotulo;
+  video.muted = d.eu;
+  video.controls = !d.eu && !d.pausado; // dá a quem assiste o controle de volume do áudio compartilhado
+
+  const legenda = bloco.querySelector(".legenda");
+  const nome = Object.assign(document.createElement("span"), { className: "nome", textContent: d.rotulo });
+  const filhos = [avatar(d.nomeAvatar), nome];
+  if (d.selo) filhos.push(Object.assign(document.createElement("span"), { className: "selo " + d.selo.classe, textContent: d.selo.texto, title: d.selo.dica || "" }));
+  legenda.replaceChildren(...filhos);
+
   bloco.classList.toggle("destaque", estado.destaque === bloco.dataset.chave);
-  const pausado = bloco.querySelector(".pausado");
-  pausado.textContent = d.pausado ? "Pausado — clique para voltar a assistir" : d.conectando ? "Conectando…" : "";
-  mostrar(pausado, d.pausado || d.conectando);
-  bloco.querySelector(".btn-pausa").textContent = d.pausado ? "Assistir" : "Pausar";
+
+  const sobre = bloco.querySelector(".sobreposicao");
+  sobre.replaceChildren();
+  sobre.classList.toggle("clicavel", Boolean(d.pausado));
+  if (d.sobreposicao) {
+    if (d.sobreposicao.girando) sobre.appendChild(Object.assign(document.createElement("div"), { className: "girando" }));
+    sobre.appendChild(Object.assign(document.createElement("div"), { className: "titulo", textContent: d.sobreposicao.titulo }));
+    if (d.sobreposicao.texto) sobre.appendChild(Object.assign(document.createElement("div"), { textContent: d.sobreposicao.texto }));
+  }
+  mostrar(sobre, Boolean(d.sobreposicao));
+
+  const btnPausa = bloco.querySelector(".btn-pausa");
+  if (btnPausa) {
+    const titulo = d.pausado ? "Voltar a assistir" : "Pausar esta tela";
+    btnPausa.title = titulo;
+    btnPausa.setAttribute("aria-label", titulo);
+    btnPausa.replaceChildren(icone(d.pausado ? "play" : "pausa"));
+  }
+}
+
+function descreverTela(par) {
+  const base = { rotulo: par.nome, nomeAvatar: par.nome, eu: false, pausado: par.euPausei };
+  if (par.euPausei) {
+    return { ...base, sobreposicao: { titulo: "Pausado", texto: "Clique para voltar a assistir" } };
+  }
+  if (par.relay) {
+    if (par.relay.semSuporte) {
+      return { ...base, sobreposicao: { titulo: "Não foi possível exibir", texto: "A conexão direta falhou e este navegador não toca o modo via servidor. Tente o Chrome, Edge ou Firefox." } };
+    }
+    const selo = { classe: "servidor", texto: "via servidor", dica: "Sua rede bloqueou a conexão direta; a tela chega retransmitida (1–2 s de atraso)" };
+    if (!par.relay.url) return { ...base, selo, sobreposicao: { girando: true, titulo: "Conectando via servidor…", texto: "A conexão direta não funcionou na sua rede." } };
+    return { ...base, selo, url: par.relay.url };
+  }
+  if (conexaoDiretaOk(par)) return { ...base, fluxo: par.fluxo, selo: { classe: "direto", texto: "direto", dica: "Conexão direta entre os navegadores" } };
+  return { ...base, fluxo: par.fluxo, sobreposicao: { girando: true, titulo: "Conectando…", texto: `Recebendo a tela de ${par.nome}` } };
 }
 
 function desenharBlocos() {
   const grade = $("grade");
   const desejados = new Map();
-  if (estado.minhaTela) desejados.set("eu", { rotulo: "Sua tela", fluxo: estado.minhaTela, eu: true });
-  for (const [id, par] of estado.pares) {
-    if (!par.compartilhando) continue;
-    desejados.set(id, {
-      rotulo: par.nome, fluxo: par.fluxo, eu: false, pausado: par.euPausei,
-      conectando: !par.euPausei && (!par.fluxo || par.pc.connectionState !== "connected"),
-    });
+  if (estado.minhaTela) {
+    desejados.set("eu", { rotulo: "Sua tela", nomeAvatar: estado.nome, fluxo: estado.minhaTela, eu: true,
+      selo: { classe: "vivo", texto: "AO VIVO" } });
   }
+  for (const [id, par] of estado.pares) if (par.compartilhando) desejados.set(id, descreverTela(par));
   if (estado.destaque && !desejados.has(estado.destaque)) estado.destaque = null;
   // Mantém os blocos existentes para o vídeo não piscar a cada atualização.
   for (const bloco of [...grade.children]) {
@@ -453,15 +766,17 @@ $("form-entrada").addEventListener("submit", (e) => { e.preventDefault(); mostra
 $("btn-compartilhar").addEventListener("click", compartilhar);
 $("btn-sair").addEventListener("click", sair);
 $("btn-copiar").addEventListener("click", async () => {
+  const url = new URL(location.href);
+  url.searchParams.delete("so_servidor");
   try {
-    await navigator.clipboard.writeText(location.href);
-    $("btn-copiar").textContent = "Link copiado!";
+    await navigator.clipboard.writeText(url.toString());
+    toast("Link copiado! Mande para os amigos.");
   } catch {
-    prompt("Copie o link:", location.href);
+    prompt("Copie o link:", url.toString());
   }
-  setTimeout(() => ($("btn-copiar").textContent = "Copiar link"), 1500);
 });
 window.addEventListener("beforeunload", () => { estado.saindo = true; estado.ws?.close(); });
+setInterval(verificarConexoes, 2000);
 
 $("campo-nome").value = lerLocal("nome");
 $("campo-sala").value = new URLSearchParams(location.search).get("sala") || "";

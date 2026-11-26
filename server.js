@@ -15,7 +15,9 @@ const crypto = require("node:crypto");
 const { WebSocketServer, WebSocket } = require("ws");
 
 const PASTA_PUBLICA = path.join(__dirname, "public");
-const LIMITE_MENSAGEM = 64 * 1024; // um SDP com vários candidatos cabe folgado
+const LIMITE_MENSAGEM = 64 * 1024;      // mensagens de texto: um SDP com vários candidatos cabe folgado
+const LIMITE_BINARIO = 4 * 1024 * 1024;  // um pedaço de vídeo retransmitido
+const LIMITE_ATRASO = 8 * 1024 * 1024;   // fila máxima por assinante antes de cortar
 const TIPOS = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -115,14 +117,36 @@ function iniciarServidor(opcoes = {}) {
     const id = crypto.randomUUID();
     salas.set(nomeSala, sala);
     enviar(ws, "bem-vindo", { id, participantes: participantes(sala), maxPorSala });
-    const eu = { ws, nome, compartilhando: false, vivo: true };
+    // assinantes: quem recebe a tela deste participante retransmitida pelo servidor (ver abaixo).
+    const eu = { ws, nome, compartilhando: false, vivo: true, assinantes: new Set() };
     sala.set(id, eu);
     avisarTodos(sala, "entrou", { id, nome }, id);
     log(`+ ${nome} entrou em "${nomeSala}" (${sala.size}/${maxPorSala})`);
     aoMudarSalas();
 
     ws.on("pong", () => { eu.vivo = true; });
-    ws.on("message", (bruto) => {
+    const prefixoId = Buffer.from(id, "ascii"); // 36 bytes
+
+    ws.on("message", (bruto, binario) => {
+      // Mensagem binária = pedaço de vídeo da tela deste participante, para os que não conseguiram
+      // conexão direta (CGNAT, 4G, firewall). O servidor repassa a cada assinante, prefixando o
+      // id de quem compartilha para o navegador saber de quem é.
+      if (binario) {
+        for (const idAssinante of eu.assinantes) {
+          const destino = sala.get(idAssinante);
+          if (!destino) { eu.assinantes.delete(idAssinante); continue; }
+          // Quem não dá conta de baixar não pode encher a memória do servidor: corta e avisa,
+          // o navegador dele pede de novo e recomeça de um quadro-chave.
+          if (destino.ws.bufferedAmount > LIMITE_ATRASO) {
+            eu.assinantes.delete(idAssinante);
+            enviar(destino.ws, "sinal", { de: id, tipo: "relay-atrasado", dados: {} });
+            continue;
+          }
+          destino.ws.send(Buffer.concat([prefixoId, bruto]), { binary: true });
+        }
+        return;
+      }
+      if (bruto.length > LIMITE_MENSAGEM) return;
       let msg;
       try {
         msg = JSON.parse(bruto.toString("utf8"));
@@ -132,7 +156,13 @@ function iniciarServidor(opcoes = {}) {
       const tipo = limpar(msg.tipo, 20);
       if (msg.para) {
         const destino = sala.get(msg.para);
-        if (destino) enviar(destino.ws, "sinal", { de: id, tipo, dados: msg.dados });
+        if (!destino) return;
+        if (tipo === "relay") {
+          // Pedido para receber a tela de `para` pelo servidor (ou parar de receber).
+          if (msg.dados && msg.dados.ativo) destino.assinantes.add(id);
+          else destino.assinantes.delete(id);
+        }
+        enviar(destino.ws, "sinal", { de: id, tipo, dados: msg.dados });
       } else {
         if (tipo === "estado") {
           eu.compartilhando = Boolean(msg.dados && msg.dados.compartilhando);
@@ -143,6 +173,7 @@ function iniciarServidor(opcoes = {}) {
     });
     ws.on("close", () => {
       sala.delete(id);
+      for (const outro of sala.values()) outro.assinantes.delete(id);
       avisarTodos(sala, "saiu", { id });
       if (sala.size === 0 && salas.get(nomeSala) === sala) salas.delete(nomeSala);
       log(`- ${nome} saiu de "${nomeSala}" (${sala.size}/${maxPorSala})`);
@@ -160,7 +191,7 @@ function iniciarServidor(opcoes = {}) {
     res.writeHead(405).end();
   });
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: LIMITE_MENSAGEM });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: LIMITE_BINARIO });
   servidor.on("upgrade", (req, socket, cabeca) => {
     const url = new URL(req.url, "http://localhost");
     if (url.pathname !== "/ws") return socket.destroy();
