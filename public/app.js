@@ -29,11 +29,12 @@ const FORCAR_SERVIDOR = new URLSearchParams(location.search).has("so_servidor");
 // fluidos porque quase toda placa de vídeo o codifica por hardware: com VP9 (só por software) em
 // resolução alta, o processador não dá conta e o próprio navegador derruba o fps.
 // recomendado: bitrate por pessoa abaixo do qual a resolução escolhida começa a ficar ruim.
-// Full HD, 1440p e 4K usam "maintain-resolution": faltando banda ou CPU, cai o fps e a resolução
-// fica, que é o que se espera ao escolher uma resolução. "Fluidez máxima" faz o contrário.
+// degradacao: o que sacrificar quando falta banda ou CPU. Full HD (padrão) usa "balanced": cai um
+// pouco de cada, em vez de derrubar o fps (travar a resolução deixava jogo engasgado). 1440p e 4K
+// travam a resolução, que é o motivo de escolhê-los. "Fluidez máxima" trava os 60 fps.
 // 4K e 1440p só saem se o monitor tiver essa resolução (a captura não aumenta a imagem).
 const QUALIDADES = {
-  fullhd:      { nome: "Full HD (1080p, 60 fps)",               altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 4e6,  gravacao: 8e6,  codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "maintain-resolution" },
+  fullhd:      { nome: "Full HD (1080p, 60 fps)",               altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 4e6,  gravacao: 8e6,  codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "balanced" },
   equilibrado: { nome: "Quad HD (1440p, 60 fps)",               altura: 1440, fps: 60, dica: "motion", maximo: 20e6, recomendado: 7e6,  gravacao: 12e6, codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "maintain-resolution" },
   uhd:         { nome: "4K (2160p, 60 fps)",                    altura: 2160, fps: 60, dica: "motion", maximo: 40e6, recomendado: 15e6, gravacao: 20e6, codecs: ["H264", "AV1", "VP9", "VP8"], degradacao: "maintain-resolution" },
   movimento:   { nome: "Fluidez máxima (jogos rápidos, 60 fps)", altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 3e6,  gravacao: 8e6,  codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "maintain-framerate" },
@@ -43,7 +44,7 @@ const QUALIDADES = {
 const QUALIDADE_PADRAO = "fullhd";
 // Upload que a pessoa diz ter; 80% dele vai para a tela, o resto fica para o resto da internet.
 const UPLOADS_MBPS = [5, 10, 20, 50, 100, 300, 500, 1000];
-const UPLOAD_PADRAO_MBPS = 20;
+const UPLOAD_PADRAO_MBPS = 50;
 const FRACAO_DO_UPLOAD = 0.8;
 // O Chrome começa a transmitir em ~300 kbps e sobe devagar, deixando a tela borrada nos
 // primeiros segundos. Esta dica no SDP faz ele começar já num bitrate decente.
@@ -58,6 +59,39 @@ const AUDIO_DA_TELA = {
   autoGainControl: false,
   suppressLocalAudioPlayback: false,
 };
+// Reforço de volume do som enviado. Som de jogo capturado do sistema costuma chegar baixo. A
+// cadeia é fixa (sem timers, que o navegador congela quando a aba fica em segundo plano enquanto a
+// pessoa joga): ganho → compressor (sobe o baixo e segura o alto) → limitador (nunca estoura).
+const REFORCO_GANHO = 4;       // +12 dB
+const REFORCO_COMPRESSOR = { threshold: -24, knee: 12, ratio: 4, attack: 0.005, release: 0.25 };
+const LIMITADOR = { threshold: -1, knee: 0, ratio: 20, attack: 0.001, release: 0.1 };
+
+function criarProcessadorDeSom(faixa) {
+  contextoAudio ??= new AudioContext();
+  if (contextoAudio.state === "suspended") contextoAudio.resume().catch(() => {});
+  const ctx = contextoAudio;
+  const fonte = ctx.createMediaStreamSource(new MediaStream([faixa]));
+  const ganho = ctx.createGain();
+  const compressor = ctx.createDynamicsCompressor();
+  const limitador = ctx.createDynamicsCompressor();
+  for (const [k, v] of Object.entries(LIMITADOR)) limitador[k].value = v;
+  const destino = ctx.createMediaStreamDestination();
+  destino.channelCount = 2;
+  fonte.connect(ganho).connect(compressor).connect(limitador).connect(destino);
+  const aplicar = (reforcar) => {
+    ganho.gain.setTargetAtTime(reforcar ? REFORCO_GANHO : 1, ctx.currentTime, 0.05);
+    for (const [k, v] of Object.entries(REFORCO_COMPRESSOR)) compressor[k].value = reforcar ? v : (k === "ratio" ? 1 : v);
+  };
+  aplicar($("reforcar-volume").checked);
+  const saida = destino.stream.getAudioTracks()[0];
+  saida.contentHint = "music";
+  return {
+    faixa: saida,
+    aplicar,
+    fechar() { try { fonte.disconnect(); limitador.disconnect(); } catch { /* já fechado */ } saida.stop(); },
+  };
+}
+
 // Sem som por este tempo, com a faixa de áudio existindo, vira aviso para quem compartilha.
 const SILENCIO_SUSPEITO_MS = 20000;
 const NIVEL_MINIMO_SOM = 0.002; // RMS abaixo disso é silêncio
@@ -154,8 +188,30 @@ async function medirQualidadeRecebida() {
     }
     if (par.qualidadeRecebida !== texto) { par.qualidadeRecebida = texto; mudou = true; }
   }
-  const minha = estado.minhaTela?.getVideoTracks()[0]?.getSettings();
-  const textoMinha = minha ? textoDeQualidade(minha.height, minha.frameRate) : "";
+  // Minha tela: o que o codificador está mandando de verdade (pior caso entre quem assiste direto),
+  // por que está limitado, e se é a placa de vídeo que codifica.
+  let textoMinha = "";
+  if (estado.minhaTela) {
+    let pior = null;
+    for (const par of estado.pares.values()) {
+      if (!par.envios.length || par.elePausou || par.pc.connectionState !== "connected") continue;
+      try {
+        (await par.pc.getStats()).forEach((x) => {
+          if (x.type !== "outbound-rtp" || x.kind !== "video" || !x.frameHeight) return;
+          const m = { altura: x.frameHeight, fps: x.framesPerSecond || 0, limite: x.qualityLimitationReason, hw: x.powerEfficientEncoder };
+          if (!pior || m.fps < pior.fps) pior = m;
+        });
+      } catch { /* conexão fechando */ }
+    }
+    const config = estado.minhaTela.getVideoTracks()[0]?.getSettings();
+    textoMinha = pior ? textoDeQualidade(pior.altura, pior.fps) : textoDeQualidade(config?.height, config?.frameRate);
+    const desempenho = pior ? { altura: pior.altura, fps: Math.round(pior.fps), limite: pior.limite || "none", hw: pior.hw ?? null } : null;
+    if (JSON.stringify(desempenho) !== JSON.stringify(estado.desempenho)) {
+      estado.desempenho = desempenho;
+      atualizarInfoDesempenho();
+      sinal("desempenho", desempenho); // quem assiste vê por que a tela está travando
+    }
+  }
   if (estado.qualidadeEnviada !== textoMinha) { estado.qualidadeEnviada = textoMinha; mudou = true; }
   if (mudou) desenharBlocos();
 }
@@ -291,8 +347,8 @@ function criarPar(id, nome) {
 
 function enviarTelaPara(par) {
   const q = qualidadeAtual();
-  par.envios = estado.minhaTela.getTracks().map((track) => {
-    const sender = par.pc.addTrack(track, estado.minhaTela);
+  par.envios = estado.fluxoEnvio.getTracks().map((track) => {
+    const sender = par.pc.addTrack(track, estado.fluxoEnvio);
     // Precisa ser antes da negociação, que o addTrack só dispara na próxima volta do loop.
     if (track.kind === "video") preferirCodecs(par.pc.getTransceivers().find((t) => t.sender === sender), q);
     return { sender, track };
@@ -452,9 +508,11 @@ function idDoPar(par) {
 
 // ---------- Plano B: tela via servidor (lado de quem compartilha) ----------
 function escolherMime() {
-  const opcoes = estado.minhaTela.getAudioTracks().length
-    ? ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
-    : ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  // A gravação do modo via servidor é por software. Em 60 fps o VP9 pesa demais no processador e
+  // derruba o fps; o VP8 é bem mais leve. Abaixo disso, o VP9 dá imagem melhor no mesmo bitrate.
+  const codecs = qualidadeAtual().fps >= 60 ? ["vp8", "vp9"] : ["vp9", "vp8"];
+  const comAudio = estado.fluxoEnvio.getAudioTracks().length > 0;
+  const opcoes = [...codecs.map((c) => `video/webm;codecs=${c}${comAudio ? ",opus" : ""}`), "video/webm"];
   return opcoes.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || null;
 }
 
@@ -470,7 +528,7 @@ function reiniciarGravacao() {
     console.warn("Este navegador não grava a tela em WebM; plano B indisponível");
     return;
   }
-  const recorder = new MediaRecorder(estado.minhaTela, {
+  const recorder = new MediaRecorder(estado.fluxoEnvio, {
     mimeType: mime,
     videoBitsPerSecond: qualidadeAtual().gravacao,
     audioBitsPerSecond: 128e3,
@@ -513,6 +571,23 @@ function removerAssinante(id) {
   const g = estado.gravacao;
   if (!g || !g.assinantes.delete(id)) return;
   if (!g.assinantes.size) pararGravacao(false);
+}
+
+const EXPLICACAO_LIMITE = {
+  cpu: "limitado pelo processador (o codificador não dá conta: feche programas pesados ou baixe a qualidade)",
+  bandwidth: "limitado pela internet (o upload não comporta: baixe a qualidade ou o número de pessoas assistindo direto)",
+  other: "limitado por outro motivo",
+};
+
+function atualizarInfoDesempenho() {
+  const el = $("info-desempenho");
+  const d = estado.desempenho;
+  if (!estado.minhaTela || !d) { el.textContent = ""; return; }
+  const partes = [`Enviando ${textoDeQualidade(d.altura, d.fps)}`];
+  if (d.hw === true) partes.push("placa de vídeo");
+  else if (d.hw === false) partes.push("codificando no processador");
+  el.textContent = partes.join(" · ") + (EXPLICACAO_LIMITE[d.limite] ? " · " + EXPLICACAO_LIMITE[d.limite] : "");
+  el.classList.toggle("alerta", Boolean(EXPLICACAO_LIMITE[d.limite]));
 }
 
 // ---------- Qualidade adaptativa ----------
@@ -644,6 +719,10 @@ function conectar(reconectando) {
       else if (tipo === "ice") await tratarIce(de, dados);
       else if (tipo === "assistir") await tratarPedidoAssistir(de, Boolean(dados && dados.ativo));
       else if (tipo === "relay") tratarPedidoRelay(de, Boolean(dados && dados.ativo));
+      else if (tipo === "desempenho") {
+        const par = estado.pares.get(de);
+        if (par) { par.desempenho = dados && typeof dados === "object" ? dados : null; desenharBlocos(); }
+      }
       else if (tipo === "relay-inicio") {
         const par = estado.pares.get(de);
         if (par && typeof dados?.mime === "string") iniciarFluxoRelay(par, dados.mime);
@@ -797,6 +876,8 @@ async function compartilhar() {
     // numa chamada). Avisa quem compartilha e quem assiste.
     faixaAudio.addEventListener("ended", () => {
       if (estado.minhaTela !== tela) return;
+      // O som reforçado continuaria mandando silêncio: encerra também.
+      estado.processadorSom?.fechar();
       mostrarAvisoSom("parou");
       sinal("estado", estadoDoMeuCompartilhamento());
       desenharBlocos();
@@ -804,6 +885,17 @@ async function compartilhar() {
   }
   estado.pediuAudio = $("com-audio").checked;
   estado.minhaTela = tela;
+  // O que vai para os outros: o vídeo capturado e o som já com o reforço de volume.
+  estado.processadorSom = null;
+  estado.fluxoEnvio = tela;
+  if (faixaAudio) {
+    try {
+      estado.processadorSom = criarProcessadorDeSom(faixaAudio);
+      estado.fluxoEnvio = new MediaStream([tela.getVideoTracks()[0], estado.processadorSom.faixa]);
+    } catch (e) {
+      console.warn("Sem reforço de volume; mandando o som original", e);
+    }
+  }
   estado.silencioDesde = Date.now();
   // Aviso fixo (não some sozinho) quando a tela foi sem som: o seletor do Chrome deixa
   // "Compartilhar áudio do sistema" desligado em "Tela inteira", e é fácil não perceber.
@@ -825,6 +917,9 @@ function pararCompartilhar() {
   if (!tela) return;
   pararGravacao(true);
   estado.minhaTela = null;
+  estado.processadorSom?.fechar();
+  estado.processadorSom = null;
+  estado.fluxoEnvio = null;
   tela.getTracks().forEach((t) => t.stop());
   for (const par of estado.pares.values()) {
     for (const { sender } of par.envios) {
@@ -834,6 +929,8 @@ function pararCompartilhar() {
     par.elePausou = false;
   }
   if (estado.destaque === "eu") estado.destaque = null;
+  estado.desempenho = null;
+  atualizarInfoDesempenho();
   mostrarAvisoSom(null);
   sinal("estado", { compartilhando: false });
   atualizarBotaoCompartilhar();
@@ -1059,10 +1156,18 @@ function atualizarBloco(bloco, d) {
   const filhos = [avatar(d.nomeAvatar), nome];
   if (d.selo) filhos.push(Object.assign(document.createElement("span"), { className: "selo " + d.selo.classe, textContent: d.selo.texto, title: d.selo.dica || "" }));
   if (d.resolucao && !d.sobreposicao) {
-    filhos.push(Object.assign(document.createElement("span"), {
-      className: "selo resolucao", textContent: d.resolucao,
-      title: d.eu ? "Resolução e fps que você está capturando" : "Resolução e fps que estão chegando para você agora",
-    }));
+    const limite = EXPLICACAO_LIMITE[d.limiteDoEnvio];
+    const selo = Object.assign(document.createElement("span"), {
+      className: "selo resolucao" + (limite ? " limitado" : ""),
+      textContent: d.resolucao + (limite ? " ⚠" : ""),
+      title: (d.eu ? "Resolução e fps que você está enviando" : "Resolução e fps que estão chegando para você agora") +
+        (limite ? `. Envio ${limite.replace(/\(.*\)/, "").trim()}${d.eu ? "" : ` (no PC de ${d.rotulo})`}.` : ""),
+    });
+    if (limite) {
+      selo.classList.add("clicavel");
+      selo.addEventListener("click", (e) => { e.stopPropagation(); toast(selo.title, 9000); });
+    }
+    filhos.push(selo);
   }
   // Diz se a tela tem som, para ninguém ficar procurando volume numa tela que foi sem áudio.
   const selo = document.createElement("span");
@@ -1103,10 +1208,12 @@ function descreverTela(par) {
   // outra pessoa anuncia: assim versões antigas da página não aparecem como "sem som" à toa.
   const chegandoSom = Boolean(par.fluxo?.getAudioTracks().some((t) => t.readyState === "live" && !t.muted)) ||
     Boolean(par.relay?.mime?.includes("opus"));
-  const audio = par.temAudio || chegandoSom;
+  // O que chega só vale quando a outra pessoa não informa (página antiga); se ela informa, é a
+  // palavra dela que conta (ex.: a captura parou, mas ainda chega silêncio por alguns segundos).
+  const audio = par.temAudio || (par.motivoSemAudio === "antigo" && chegandoSom);
   const base = { rotulo: par.nome, nomeAvatar: par.nome, eu: false, pausado: par.euPausei, audio,
     explicacaoSemSom: audio ? "" : (EXPLICACAO_SEM_SOM[par.motivoSemAudio] || EXPLICACAO_SEM_SOM["nao-capturado"])(par.nome, par.navegador || "navegador"),
-    resolucao: par.qualidadeRecebida };
+    resolucao: par.qualidadeRecebida, limiteDoEnvio: par.desempenho?.limite };
   if (par.euPausei) {
     return { ...base, sobreposicao: { titulo: "Pausado", texto: "Clique para voltar a assistir" } };
   }
@@ -1126,9 +1233,11 @@ function desenharBlocos() {
   const grade = $("grade");
   const desejados = new Map();
   if (estado.minhaTela) {
-    desejados.set("eu", { rotulo: "Sua tela", nomeAvatar: estado.nome, fluxo: estado.minhaTela, eu: true,
+    // Mostra o que os outros recebem (o medidor de som já inclui o reforço de volume).
+    desejados.set("eu", { rotulo: "Sua tela", nomeAvatar: estado.nome, fluxo: estado.fluxoEnvio || estado.minhaTela, eu: true,
       audio: estado.minhaTela.getAudioTracks().length > 0,
       resolucao: estado.qualidadeEnviada,
+      limiteDoEnvio: estado.desempenho?.limite,
       selo: { classe: "vivo", texto: "AO VIVO" } });
   }
   for (const [id, par] of estado.pares) if (par.compartilhando) desejados.set(id, descreverTela(par));
@@ -1194,6 +1303,11 @@ setInterval(medirQualidadeRecebida, 2000);
 setInterval(atualizarMedidores, 150);
 $("btn-recompartilhar").addEventListener("click", recompartilharComSom);
 $("btn-recarregar").addEventListener("click", () => location.reload());
+$("reforcar-volume").checked = lerLocal("reforcar-volume") !== "nao";
+$("reforcar-volume").addEventListener("change", () => {
+  gravarLocal("reforcar-volume", $("reforcar-volume").checked ? "sim" : "nao");
+  estado.processadorSom?.aplicar($("reforcar-volume").checked); // vale na hora, sem recompartilhar
+});
 $("btn-fechar-aviso-som").addEventListener("click", () => mostrarAvisoSom(null));
 
 $("campo-nome").value = lerLocal("nome");

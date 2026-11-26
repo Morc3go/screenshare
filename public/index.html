@@ -78,8 +78,12 @@
     <label class="chave" title="Chrome e Edge: escolha Tela inteira ou Aba e deixe ligado Compartilhar áudio. No macOS, só Aba. O Firefox não manda som.">
       <input type="checkbox" id="com-audio" checked><span class="trilho"></span><span>Incluir áudio</span>
     </label>
+    <label class="chave" title="Aumenta o som baixo (até +12 dB) e segura o alto para não estourar. Pode ligar e desligar durante o compartilhamento.">
+      <input type="checkbox" id="reforcar-volume" checked><span class="trilho"></span><span>Reforçar volume</span>
+    </label>
     <button class="btn primario oculto" id="btn-ativar-som" type="button"><svg><use href="#i-som"/></svg><span>Ativar som</span></button>
     <span class="info-envio" id="info-envio"></span>
+    <span class="info-envio" id="info-desempenho"></span>
   </div>
 
   <div id="aviso-versao" class="aviso oculto" role="alert">

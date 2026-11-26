@@ -112,6 +112,9 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--acento-
 .chave input:checked + .trilho::after { transform: translateX(16px); background: #fff; }
 .chave input:focus-visible + .trilho { outline: 2px solid var(--acento-2); outline-offset: 2px; }
 .info-envio { font-size: 13px; color: var(--suave); }
+.info-envio.alerta { color: var(--alerta); }
+.selo.resolucao.limitado { background: rgba(255, 179, 71, .3); color: #ffe0b0; }
+.selo.resolucao.clicavel { pointer-events: auto; cursor: help; }
 
 /* ---------- Grade de telas ---------- */
 .grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 14px; }

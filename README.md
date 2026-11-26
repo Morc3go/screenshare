@@ -60,13 +60,16 @@ que o app é aberto.
 
 - **Qualidade**: *Full HD* (padrão: 1080p, 60 fps), *Quad HD* (1440p, 60 fps), *4K* (2160p,
   60 fps), *Fluidez máxima* (jogos rápidos: mantém os 60 fps e baixa a resolução se precisar),
-  *Texto nítido* (resolução do monitor, 30 fps) ou *Internet fraca* (720p, 30 fps). Em Full HD,
-  Quad HD e 4K a resolução fica travada: faltando banda ou processador, cai o fps, não a
-  resolução. Quad HD e 4K só saem se o monitor de quem compartilha tiver essa resolução.
-  Cada tela mostra a resolução e o fps que estão chegando de verdade (ex.: "1080p · 60 fps").
+  *Texto nítido* (resolução do monitor, 30 fps) ou *Internet fraca* (720p, 30 fps). No Full HD,
+  faltando banda ou processador, cai um pouco de resolução e de fps; no Quad HD e no 4K a
+  resolução fica travada e só o fps cai. Quad HD e 4K só saem se o monitor tiver essa resolução.
+- **Resolução e fps reais**: cada tela mostra o que está chegando de verdade (ex.: "1080p · 60
+  fps"). Quem compartilha vê embaixo dos controles o que está enviando, se a codificação está na
+  placa de vídeo e, se o fps estiver baixo, **o motivo**: processador ou internet. Quando o envio
+  está limitado, o selo da tela fica laranja com ⚠ para quem assiste também; clique nele para ver.
 - **Seu upload**: informe a velocidade de **upload** da sua internet (em [fast.com](https://fast.com),
   clique em "Mais informações"). O app usa 80% dela para a tela. Quanto maior, mais nítida sua
-  tela chega para os outros. O padrão é 20 Mbps.
+  tela chega para os outros. O padrão é 50 Mbps.
 - **Pausar** numa tela: você para de receber essa tela, e quem compartilha para de enviar
   para você, sobrando banda para os outros.
 - **Destacar**: amplia uma tela no topo. **Tela cheia**: ocupa o monitor.
@@ -77,6 +80,9 @@ que o app é aberto.
   Cada tela tem um medidor de som: na sua, mostra se o som está saindo; nas dos outros, se está
   chegando. Se sua tela estiver com som ligado mas muda por 20 s, o site avisa (volume do Windows
   no mudo, ou o jogo tocando num dispositivo que não é o padrão do Windows).
+- **Reforçar volume** (ligado por padrão): som de jogo capturado do sistema costuma sair baixo.
+  Com isso ligado, o som baixo sobe até uns 12 dB e um limitador impede o alto de estourar. Dá
+  para ligar e desligar durante o compartilhamento.
 
 ## Qualidade da imagem
 
