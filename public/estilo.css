@@ -111,8 +111,12 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--acento-
 .chave input:checked + .trilho { background: var(--acento-2); border-color: var(--acento-2); }
 .chave input:checked + .trilho::after { transform: translateX(16px); background: #fff; }
 .chave input:focus-visible + .trilho { outline: 2px solid var(--acento-2); outline-offset: 2px; }
-.info-envio { font-size: 13px; color: var(--suave); }
-.info-envio.alerta { color: var(--alerta); }
+.status-envio { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 14px; }
+.status-envio:not(:has(.etiqueta)) { display: none; }
+.etiquetas { display: contents; }
+.etiqueta { font-size: 12px; font-weight: 600; color: var(--suave); background: var(--superficie); border: 1px solid var(--borda);
+  padding: 3px 10px; border-radius: 999px; white-space: nowrap; cursor: default; }
+.etiqueta.alerta { color: var(--alerta); border-color: rgba(255, 179, 71, .5); background: rgba(255, 179, 71, .08); cursor: help; }
 .selo.resolucao.limitado { background: rgba(255, 179, 71, .3); color: #ffe0b0; }
 .selo.resolucao.clicavel { pointer-events: auto; cursor: help; }
 
@@ -184,7 +188,14 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--acento-
   padding: 10px 16px; border-radius: 12px; font-size: 14px; font-weight: 600; transition: opacity .2s, transform .2s; z-index: 10; }
 .toast.visivel { opacity: 1; transform: translate(-50%, 0); }
 
+.so-assistir { margin: 0; color: var(--suave); font-size: 14px; }
+/* Telas de toque: o volume é pelos botões do aparelho, a barra só atrapalha. */
+@media (hover: none) { .acoes-bloco .volume { display: none; } }
 @media (max-width: 640px) {
+  .topo { padding: 10px 12px; gap: 10px; }
+  .topo-esq .logo.pequeno { display: none; }
+  .pessoa { font-size: 12px; }
+  .acoes-bloco button { width: 30px; height: 30px; }
   .topo-dir .btn span { display: none; }
   .topo-dir .btn { padding: 10px; }
   #btn-compartilhar { width: 100%; }

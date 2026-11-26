@@ -1,7 +1,7 @@
 {
   "name": "compartilha-tela",
   "productName": "Compartilha Tela",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "description": "Compartilhe a tela com até 10 amigos pelo navegador (WebRTC), direto do seu PC.",
   "main": "desktop/main.js",
   "scripts": {
@@ -10,7 +10,8 @@
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",
-    "dist:linux": "electron-builder --linux --publish never"
+    "dist:linux": "electron-builder --linux --publish never",
+    "test": "node tests/rodar.js"
   },
   "engines": {
     "node": ">=18"
@@ -22,7 +23,8 @@
   },
   "devDependencies": {
     "electron": "^45.5.0",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "playwright": "^1.63.0"
   },
   "build": {
     "appId": "io.github.morc3go.compartilhatela",

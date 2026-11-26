@@ -61,6 +61,7 @@ if (!app.requestSingleInstanceLock()) {
   async function ligar() {
     const opcoes = {
       obterSenha: () => config.senha,
+      obterLinkPublico: () => (tunel?.estado.fase === "online" ? tunel.estado.url : null),
       maxPorSala: 10,
       aoMudarSalas: avisarPainel,
     };

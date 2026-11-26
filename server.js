@@ -43,6 +43,9 @@ function limpar(texto, max) {
  */
 function iniciarServidor(opcoes = {}) {
   const obterSenha = opcoes.obterSenha || (() => "");
+  // Endereço público (o link do túnel), quando quem hospeda sabe qual é: o "Copiar link" da página
+  // aberta no localhost usa este, porque "localhost" não serve para os amigos.
+  const obterLinkPublico = opcoes.obterLinkPublico || (() => null);
   const maxPorSala = opcoes.maxPorSala || 10;
   const log = opcoes.log || (() => {});
   const aoMudarSalas = opcoes.aoMudarSalas || (() => {});
@@ -104,6 +107,9 @@ function iniciarServidor(opcoes = {}) {
   //   com `para`: repassa só para esse participante (offer/answer/ICE/pedido de pausa)
   //   sem `para`: avisa a sala inteira (ex.: começou/parou de compartilhar)
   function aoConectar(ws, url) {
+    // Erro na conexão de UMA pessoa (mensagem grande demais, conexão quebrada) não pode virar
+    // exceção solta: derrubaria o servidor e a sala de todo mundo. O ws já fecha essa conexão.
+    ws.on("error", (e) => log(`! conexão encerrada por erro: ${e.code || e.message}`));
     // Recusas chegam como mensagem antes do fechamento, para o navegador mostrar o motivo.
     const recusar = (motivo) => {
       enviar(ws, "recusado", { motivo });
@@ -187,7 +193,7 @@ function iniciarServidor(opcoes = {}) {
     const url = new URL(req.url, "http://localhost");
     if (req.method === "GET" && url.pathname === "/config") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-cache" });
-      return res.end(JSON.stringify({ exigeSenha: Boolean(obterSenha()), maxPorSala, versao: VERSAO }));
+      return res.end(JSON.stringify({ exigeSenha: Boolean(obterSenha()), maxPorSala, versao: VERSAO, linkPublico: obterLinkPublico() }));
     }
     if (req.method === "GET") return servirEstatico(req, res, url);
     res.writeHead(405).end();

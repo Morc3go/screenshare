@@ -195,6 +195,22 @@ amigos acessarem, rode o túnel à mão em outro terminal: `cloudflared tunnel -
 Gerar o instalador localmente: `npm run dist:win`, `npm run dist:mac` ou `npm run dist:linux`
 (saem em `dist/`). Para publicar uma versão, veja [Atualizações](#atualizações).
 
+## Testes
+
+```bash
+npm test
+```
+
+Roda um Chromium de verdade com várias "pessoas" na mesma sala (a tela compartilhada é uma
+animação e o som um tom, gerados pelo teste; todo o resto é o código real) e verifica: conexão
+direta, modo via servidor, sala cheia com 10 pessoas, som (qualidade, reforço, mudo, avisos de sem
+som), tela cheia, aba escondida, queda do servidor, upload automático, 4K, segurança (senha,
+arquivos fora do site, mensagem gigante) e celular. Ao terminar, grava as medições em
+[`docs/relatorio-de-testes.md`](docs/relatorio-de-testes.md). Para rodar só alguns:
+`npm test -- som 4k`.
+
+No GitHub, os testes rodam antes de gerar os instaladores: se algum falhar, nada é publicado.
+
 ## Limitações
 
 - **Link de túnel grátis**: o `trycloudflare.com` não tem garantia de disponibilidade. Se ele

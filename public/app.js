@@ -51,10 +51,10 @@ const FRACAO_DO_UPLOAD = 0.7;
 // é isso que deixa o resto da internet (jogo, Discord, navegação) ruim. Então: atraso subiu,
 // corta o envio; ficou estável e o envio está batendo no teto, sobe devagar.
 const AUTO = {
-  inicial: 6e6, minimo: 1.5e6, maximo: 100e6,
+  inicial: 12e6, minimo: 1.5e6, maximo: 100e6,
   atrasoToleradoS: 0.06,  // RTT acima do mínimo visto por mais que isso = fila se formando
   corte: 0.75, subida: 1.15,
-  esperaParaSubirMs: 8000,
+  esperaParaSubirMs: 4000,
 };
 // O Chrome começa a transmitir em ~300 kbps e sobe devagar, deixando a tela borrada nos
 // primeiros segundos. Esta dica no SDP faz ele começar já num bitrate decente.
@@ -113,8 +113,10 @@ const OCIOSO_TELA_CHEIA_MS = 2500;
 const ESPERA_ABA_ESCONDIDA_MS = 5000;
 // Plano B: toca ~1 s atrás do "ao vivo" para ter folga contra oscilação; se acumular mais que
 // ATRASO_MAXIMO_S (aba em segundo plano, rede lenta), pula de volta para perto do ao vivo.
-const FOLGA_RELAY_S = 1.0;
-const ATRASO_MAXIMO_S = 3.0;
+const FOLGA_RELAY_S = 1.0;       // folga inicial
+const FOLGA_RELAY_MAX_S = 3.0;   // a folga cresce a cada travada até aqui (buffer adaptativo)
+const FOLGA_RELAY_PASSO_S = 0.3;
+const ATRASO_ALEM_DA_FOLGA_S = 2.0; // acumulou mais que folga + isto: pula de volta para perto do ao vivo
 
 const $ = (id) => document.getElementById(id);
 const mostrar = (el, sim) => el.classList.toggle("oculto", !sim);
@@ -130,7 +132,7 @@ const estado = {
   minhaTela: null,      // MediaStream da minha tela
   destaque: null,       // chave do bloco ampliado
   gravacao: null,       // plano B do meu lado: { recorder, mime, assinantes:Set, fila:Promise }
-  auto: { orcamento: 6e6, rttBase: new Map(), ultimoCorte: 0, bytesAntes: null, quandoAntes: 0 },
+  auto: { orcamento: AUTO.inicial, rttBase: new Map(), ultimoCorte: 0, bytesAntes: null, quandoAntes: 0 },
   mudos: new Set(),     // telas que EU silenciei
   volumes: new Map(),   // chave do bloco -> volume escolhido (0 a 1)
   avisoSom: null,       // null | "sem-faixa" | "silencio"
@@ -564,9 +566,10 @@ function alimentarRelay(par) {
   if (video && r.sb.buffered.length) {
     const fim = r.sb.buffered.end(r.sb.buffered.length - 1);
     const folga = fim - video.currentTime;
-    if (folga > ATRASO_MAXIMO_S) video.currentTime = fim - FOLGA_RELAY_S;
+    const alvo = r.folga ?? FOLGA_RELAY_S;
+    if (folga > alvo + ATRASO_ALEM_DA_FOLGA_S) video.currentTime = fim - alvo;
     // Só (re)começa a tocar com folga no buffer; tocar colado na borda faz o player travar a cada pedaço.
-    if (video.paused && folga >= FOLGA_RELAY_S) tocar(video);
+    if (video.paused && folga >= alvo) tocar(video);
     // Descarta o que já passou para não encher a memória.
     const inicio = r.sb.buffered.start(0);
     if (video.currentTime - inicio > 30) { r.sb.remove(inicio, video.currentTime - 10); return; }
@@ -664,12 +667,15 @@ const EXPLICACAO_LIMITE = {
 function atualizarInfoDesempenho() {
   const el = $("info-desempenho");
   const d = estado.desempenho;
-  if (!estado.minhaTela || !d) { el.textContent = ""; return; }
-  const partes = [`Enviando ${textoDeQualidade(d.altura, d.fps)}`];
-  if (d.hw === true) partes.push("placa de vídeo");
-  else if (d.hw === false) partes.push("codificando no processador");
-  el.textContent = partes.join(" · ") + (EXPLICACAO_LIMITE[d.limite] ? " · " + EXPLICACAO_LIMITE[d.limite] : "");
-  el.classList.toggle("alerta", Boolean(EXPLICACAO_LIMITE[d.limite]));
+  if (!estado.minhaTela || !d) { el.replaceChildren(); return; }
+  const etiquetas = [{ texto: `enviando ${textoDeQualidade(d.altura, d.fps)}`, dica: "O que o codificador está mandando de verdade agora (pior caso entre quem assiste direto)." }];
+  if (d.hw === true) etiquetas.push({ texto: "placa de vídeo", dica: "A placa de vídeo está codificando a tela: leve para o processador." });
+  else if (d.hw === false) etiquetas.push({ texto: "no processador", alerta: true, dica: "A tela está sendo codificada pelo processador, o que pesa e pode baixar o fps. Uma qualidade menor ajuda." });
+  if (EXPLICACAO_LIMITE[d.limite]) {
+    const curto = { cpu: "limitado pelo processador", bandwidth: "limitado pela internet", other: "limitado" }[d.limite];
+    etiquetas.push({ texto: curto, alerta: true, dica: "Envio " + EXPLICACAO_LIMITE[d.limite] + "." });
+  }
+  desenharEtiquetas(el, etiquetas);
 }
 
 // ---------- Qualidade adaptativa ----------
@@ -711,19 +717,34 @@ async function ajustarQualidade() {
     }
   }
   const n = recebendo.length;
-  const partes = [];
-  if (n) partes.push(`${n} ${n === 1 ? "pessoa" : "pessoas"} direto · até ${mbps(porPessoa)} cada`);
-  if (viaServidor) partes.push(`${viaServidor} via servidor`);
   const soOuvindo = [...estado.pares.values()].filter((p) => p.envios.length && p.eleSemVideo).length;
-  if (soOuvindo) partes.push(`${soOuvindo} só ouvindo (com a aba do site escondida)`);
-  let texto = partes.length ? "Assistindo você: " + partes.join(" · ") : "Ninguém assistindo sua tela ainda";
-  if ($("sel-upload").value === "auto" && n) texto += ` · upload automático: usando até ${mbps(orcamento)}`;
+  const auto = $("sel-upload").value === "auto";
+  const etiquetas = [];
+  if (!n && !viaServidor && !soOuvindo) etiquetas.push({ texto: "Ninguém assistindo ainda" });
+  if (n) etiquetas.push({ texto: `${n} assistindo · ${mbps(porPessoa)} cada`, dica: `${n} ${n === 1 ? "pessoa recebe" : "pessoas recebem"} sua tela direto, até ${mbps(porPessoa)} cada.` });
+  if (viaServidor) etiquetas.push({ texto: `${viaServidor} via servidor`, dica: "Pessoas cuja rede bloqueou a conexão direta; recebem uma cópia retransmitida pelo app de quem hospeda a sala." });
+  if (soOuvindo) etiquetas.push({ texto: `${soOuvindo} só ouvindo`, dica: "Estão com a aba do site escondida: recebem só o som, até voltarem para a aba." });
+  if (auto && n) etiquetas.push({ texto: `upload auto · ${mbps(orcamento)}`, dica: "Upload automático: o app reduz o envio sozinho quando sua internet começa a engasgar, e volta a subir aos poucos." });
   if (n && porPessoa < q.recomendado) {
-    texto += $("sel-upload").value === "auto"
-      ? ` — sua internet só comporta ${mbps(porPessoa)} por pessoa agora, pouco para ${q.nome.split(" (")[0]} (ideal: ${mbps(q.recomendado)}). Uma qualidade menor fica mais fluida.`
-      : ` — pouco para ${q.nome.split(" (")[0]} (ideal: ${mbps(q.recomendado)} por pessoa). Se sua internet aguentar, aumente "Seu upload"; senão, use uma qualidade menor.`;
+    etiquetas.push({
+      texto: `pouco upload para ${q.nome.split(" (")[0]}`, alerta: true,
+      dica: auto
+        ? `Sua internet comporta ${mbps(porPessoa)} por pessoa agora; ${q.nome.split(" (")[0]} pede uns ${mbps(q.recomendado)}. Uma qualidade menor fica mais fluida.`
+        : `${q.nome.split(" (")[0]} pede uns ${mbps(q.recomendado)} por pessoa. Se sua internet aguentar, aumente "Seu upload"; senão, use uma qualidade menor.`,
+    });
   }
-  info.textContent = texto;
+  desenharEtiquetas(info, etiquetas);
+}
+
+// Linha de status de quem compartilha: etiquetas curtas; a explicação longa fica no title
+// (passar o mouse) e, nas de alerta, num aviso ao clicar.
+function desenharEtiquetas(el, etiquetas) {
+  el.replaceChildren(...etiquetas.map((e) => {
+    const span = Object.assign(document.createElement("span"), { className: "etiqueta" + (e.alerta ? " alerta" : ""), textContent: e.texto });
+    if (e.dica) span.title = e.dica;
+    if (e.alerta && e.dica) span.addEventListener("click", () => toast(e.dica, 9000));
+    return span;
+  }));
 }
 
 async function aplicarQualidadeNaFaixa() {
@@ -1184,7 +1205,14 @@ function criarBloco(chave) {
   video.autoplay = true;
   video.playsInline = true;
   // Plano B: se o buffer esvaziou, pausa e deixa alimentarRelay() retomar quando houver folga.
-  video.addEventListener("waiting", () => { if (video.dataset.url) video.pause(); });
+  // Cada travada aumenta a folga daquela tela (buffer adaptativo): rede ou gravação irregular
+  // pede mais margem; rede boa fica com pouco atraso.
+  video.addEventListener("waiting", () => {
+    if (!video.dataset.url) return;
+    video.pause();
+    const r = estado.pares.get(chave)?.relay;
+    if (r) r.folga = Math.min(FOLGA_RELAY_MAX_S, (r.folga ?? FOLGA_RELAY_S) + FOLGA_RELAY_PASSO_S);
+  });
   const legenda = document.createElement("div");
   legenda.className = "legenda";
   const sobre = document.createElement("div");
@@ -1412,8 +1440,18 @@ $("com-audio").addEventListener("change", () => {
 });
 $("btn-sair").addEventListener("click", sair);
 $("btn-copiar").addEventListener("click", async () => {
-  const url = new URL(location.href);
+  let url = new URL(location.href);
   url.searchParams.delete("so_servidor");
+  // Quem hospeda abre a sala pelo localhost, que não serve para os amigos: usa o link do túnel.
+  if (["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)) {
+    const publico = await fetch("/config").then((r) => r.json()).then((c) => c.linkPublico).catch(() => null);
+    if (!publico) {
+      toast("O link para os amigos ainda está sendo criado. Ele aparece no app (Compartilha Tela) assim que ficar pronto.", 6000);
+      return;
+    }
+    url = new URL(publico);
+    url.searchParams.set("sala", estado.sala);
+  }
   try {
     await navigator.clipboard.writeText(url.toString());
     toast("Link copiado! Mande para os amigos.");
@@ -1434,6 +1472,15 @@ $("reforcar-volume").addEventListener("change", () => {
   estado.processadorSom?.aplicar($("reforcar-volume").checked); // vale na hora, sem recompartilhar
 });
 $("btn-fechar-aviso-som").addEventListener("click", () => mostrarAvisoSom(null));
+
+// Celulares e alguns navegadores só assistem: some com os controles de compartilhar e explica.
+if (!navigator.mediaDevices?.getDisplayMedia) {
+  for (const id of ["btn-compartilhar", "sel-qualidade", "sel-upload", "com-audio", "reforcar-volume"]) {
+    const el = $(id);
+    (el.closest("label") || el).classList.add("oculto");
+  }
+  $("txt-so-assistir").classList.remove("oculto");
+}
 
 $("campo-nome").value = lerLocal("nome");
 $("campo-sala").value = new URLSearchParams(location.search).get("sala") || "";

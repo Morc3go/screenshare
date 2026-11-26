@@ -66,6 +66,7 @@
   </header>
 
   <div class="controles">
+    <p class="so-assistir oculto" id="txt-so-assistir">Neste aparelho dá para assistir e ouvir. Para compartilhar sua tela, entre pelo computador (Chrome ou Edge).</p>
     <button class="btn primario" id="btn-compartilhar"><svg><use href="#i-tela"/></svg><span>Compartilhar minha tela</span></button>
     <label class="seletor" title="Ajuste conforme o que você vai mostrar">
       <span>Qualidade</span>
@@ -82,8 +83,10 @@
       <input type="checkbox" id="reforcar-volume" checked><span class="trilho"></span><span>Reforçar volume</span>
     </label>
     <button class="btn primario oculto" id="btn-ativar-som" type="button"><svg><use href="#i-som"/></svg><span>Ativar som</span></button>
-    <span class="info-envio" id="info-envio"></span>
-    <span class="info-envio" id="info-desempenho"></span>
+  </div>
+  <div class="status-envio">
+    <span class="etiquetas" id="info-envio"></span>
+    <span class="etiquetas" id="info-desempenho"></span>
   </div>
 
   <div id="aviso-versao" class="aviso oculto" role="alert">

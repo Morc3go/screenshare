@@ -6,47 +6,70 @@
 <title>Compartilha Tela</title>
 <style>
   :root {
-    --fundo: #f4f5f7; --cartao: #ffffff; --texto: #1b1e24; --suave: #5d6573;
-    --borda: #dde1e7; --destaque: #3d63dd; --destaque-texto: #fff; --perigo: #d4413b; --ok: #1f9d55; --alerta: #c27c0e;
+    --fundo: #0b0d12; --superficie: #141821; --elevado: #1b2030; --borda: #262c3b;
+    --texto: #e9ecf2; --suave: #8d96a8; --acento-1: #7c5cff; --acento-2: #3d8bff;
+    --gradiente: linear-gradient(135deg, var(--acento-1), var(--acento-2));
+    --perigo: #ff4d5e; --ok: #2fd27a; --alerta: #ffb347; --sombra: 0 10px 30px rgba(0, 0, 0, .35);
+    --brilho-1: rgba(124, 92, 255, .22); --brilho-2: rgba(61, 139, 255, .16);
   }
-  @media (prefers-color-scheme: dark) {
-    :root { --fundo: #111318; --cartao: #1a1d24; --texto: #e8eaee; --suave: #9aa2b1;
-      --borda: #2b303a; --destaque: #6d8cf0; --destaque-texto: #0e1014; --perigo: #ef6a63; --ok: #46c37b; --alerta: #e2a43a; }
+  @media (prefers-color-scheme: light) {
+    :root { --fundo: #f4f5fa; --superficie: #ffffff; --elevado: #f0f2f8; --borda: #dfe3ec; --texto: #161a23; --suave: #5f687a;
+      --sombra: 0 10px 30px rgba(22, 26, 35, .08); --brilho-1: rgba(124, 92, 255, .14); --brilho-2: rgba(61, 139, 255, .10); }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--fundo); color: var(--texto); }
-  main { padding: 20px; display: grid; gap: 14px; }
-  h1 { font-size: 20px; margin: 0; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--suave); margin: 0 0 10px; }
-  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 16px; }
+  html, body { min-height: 100%; }
+  body { margin: 0; font: 14px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--texto);
+    background: radial-gradient(600px 400px at 0% -10%, var(--brilho-1), transparent 60%),
+                radial-gradient(500px 400px at 100% 0%, var(--brilho-2), transparent 55%), var(--fundo);
+    background-attachment: fixed; -webkit-font-smoothing: antialiased; }
+  main { padding: 18px; display: grid; gap: 12px; }
+  .cabecalho { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 40px; height: 40px; border-radius: 12px; background: var(--gradiente); display: grid; place-items: center;
+    color: #fff; box-shadow: 0 8px 22px rgba(92, 110, 255, .4); flex: none; }
+  .logo svg { width: 22px; height: 22px; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--suave); margin: 0 0 10px; display: flex; gap: 8px; align-items: center; }
+  .contagem { background: var(--elevado); border: 1px solid var(--borda); border-radius: 999px; padding: 0 8px; font-size: 11px; color: var(--suave); letter-spacing: 0; }
+  .cartao { background: var(--superficie); border: 1px solid var(--borda); border-radius: 16px; padding: 16px; box-shadow: var(--sombra); }
   .status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .ponto { width: 10px; height: 10px; border-radius: 50%; background: var(--suave); flex: none; }
-  .ponto.ok { background: var(--ok); }
+  .ponto.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(47, 210, 122, .15); }
   .ponto.espera { background: var(--alerta); animation: pulsar 1.2s infinite; }
   .ponto.erro { background: var(--perigo); }
   @keyframes pulsar { 50% { opacity: .3; } }
-  .link { font: 600 14px/1.4 ui-monospace, monospace; word-break: break-all; margin: 10px 0 12px; padding: 10px;
-    border-radius: 8px; background: var(--fundo); border: 1px solid var(--borda); user-select: all; }
+  .link { font: 600 13px/1.4 ui-monospace, "Cascadia Code", monospace; word-break: break-all; margin: 12px 0; padding: 10px 12px;
+    border-radius: 10px; background: var(--elevado); border: 1px solid var(--borda); user-select: all; }
   .linha { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .linha input { flex: 1; min-width: 0; }
-  button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 9px 14px;
-    background: var(--destaque); color: var(--destaque-texto); cursor: pointer; }
-  button.sec { background: transparent; color: var(--texto); border: 1px solid var(--borda); }
-  button:disabled { opacity: .5; cursor: default; }
-  input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--borda); background: var(--fundo); color: var(--texto); }
-  .suave { color: var(--suave); font-size: 13px; margin: 8px 0 0; }
-  .erro { color: var(--perigo); }
-  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-  li .ao-vivo { color: var(--perigo); }
-  a { color: var(--destaque); }
+  button { font: inherit; font-weight: 600; border: 1px solid transparent; border-radius: 10px; padding: 9px 14px;
+    background: var(--gradiente); color: #fff; cursor: pointer; box-shadow: 0 6px 18px rgba(92, 110, 255, .3); transition: filter .15s, transform .08s; }
+  button:hover { filter: brightness(1.08); }
+  button:active { transform: translateY(1px); }
+  button.sec { background: transparent; color: var(--texto); border-color: var(--borda); box-shadow: none; }
+  button.sec:hover { background: var(--elevado); }
+  button:disabled { opacity: .45; cursor: default; filter: none; }
+  button.grande { flex: 1; padding: 11px 16px; }
+  input { font: inherit; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--borda); background: var(--elevado); color: var(--texto); }
+  input:focus { outline: none; border-color: var(--acento-2); box-shadow: 0 0 0 3px rgba(61, 139, 255, .18); }
+  .suave { color: var(--suave); font-size: 12.5px; margin: 8px 0 0; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  li { display: flex; align-items: center; gap: 8px; }
+  .avatar { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; flex: none; }
+  .selo-vivo { font-size: 10px; font-weight: 700; color: #fff; background: var(--perigo); padding: 1px 6px; border-radius: 6px; }
+  .sala-nome { color: var(--suave); font-size: 12px; }
+  a { color: var(--acento-2); }
   .oculto { display: none !important; }
-  .atualizacao { border-color: var(--destaque); }
-  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .atualizacao { border-color: rgba(61, 139, 255, .6); }
+  label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; }
+  .rodape { text-align: center; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Compartilha Tela</h1>
+  <div class="cabecalho">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+    <h1>Compartilha Tela</h1>
+  </div>
 
   <section class="cartao atualizacao oculto" id="cartao-atualizacao">
     <div class="status"><span class="ponto" id="ponto-atualizacao"></span><span id="txt-atualizacao"></span></div>
@@ -58,15 +81,15 @@
     <div class="status"><span class="ponto" id="ponto-tunel"></span><span id="txt-tunel">Iniciando…</span></div>
     <div class="link oculto" id="txt-link"></div>
     <div class="linha">
-      <button id="btn-copiar" disabled>Copiar link</button>
-      <button class="sec" id="btn-abrir" disabled>Abrir a sala no meu navegador</button>
+      <button class="grande" id="btn-copiar" disabled>Copiar link</button>
+      <button class="sec grande" id="btn-abrir" disabled>Entrar na sala</button>
     </div>
     <p class="suave">O link muda toda vez que o app é aberto. Mande o novo para os amigos.</p>
     <p class="suave"><a href="#" id="btn-reiniciar">Reiniciar túnel</a></p>
   </section>
 
   <section class="cartao">
-    <h2>Na sala agora</h2>
+    <h2>Na sala agora <span class="contagem" id="txt-contagem">0</span></h2>
     <ul id="lista"></ul>
   </section>
 
@@ -86,12 +109,18 @@
     <p class="suave">Qualquer pessoa com o link entra. Com senha, só quem souber.</p>
   </section>
 
-  <p class="suave" id="txt-rodape"></p>
+  <p class="suave rodape" id="txt-rodape"></p>
 </main>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const mostrar = (el, sim) => el.classList.toggle("oculto", !sim);
+// Mesma cor por nome que o site usa, para a pessoa se reconhecer nos dois.
+function corDoNome(nome) {
+  let h = 0;
+  for (const c of nome) h = (h * 31 + c.codePointAt(0)) % 360;
+  return `hsl(${h} 65% 50%)`;
+}
 
 function desenhar(e) {
   const t = e.tunel;
@@ -123,15 +152,16 @@ function desenhar(e) {
     li.textContent = "Ninguém ainda.";
     lista.appendChild(li);
   }
+  $("txt-contagem").textContent = String(pessoas.length);
   for (const p of pessoas) {
     const li = document.createElement("li");
-    li.textContent = p.nome + (e.salas.length > 1 ? " · sala " + p.sala : "");
-    if (p.compartilhando) {
-      const s = document.createElement("span");
-      s.className = "ao-vivo";
-      s.textContent = " ● compartilhando";
-      li.appendChild(s);
-    }
+    const av = document.createElement("span");
+    av.className = "avatar";
+    av.style.background = corDoNome(p.nome);
+    av.textContent = (p.nome.trim()[0] || "?").toUpperCase();
+    li.append(av, document.createTextNode(p.nome));
+    if (e.salas.length > 1) li.appendChild(Object.assign(document.createElement("span"), { className: "sala-nome", textContent: "sala " + p.sala }));
+    if (p.compartilhando) li.appendChild(Object.assign(document.createElement("span"), { className: "selo-vivo", textContent: "AO VIVO" }));
     lista.appendChild(li);
   }
 
@@ -171,8 +201,8 @@ $("btn-atualizar").addEventListener("click", () => window.app.atualizar());
 
 $("btn-copiar").addEventListener("click", async () => {
   if (await window.app.copiarLink()) {
-    $("btn-copiar").textContent = "Copiado!";
-    setTimeout(() => ($("btn-copiar").textContent = "Copiar link"), 1500);
+    $("btn-copiar").textContent = "Copiado! Mande para os amigos";
+    setTimeout(() => ($("btn-copiar").textContent = "Copiar link"), 2000);
   }
 });
 $("btn-abrir").addEventListener("click", () => window.app.abrirSala());
