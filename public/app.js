@@ -38,6 +38,19 @@ const FRACAO_DO_UPLOAD = 0.8;
 // O Chrome começa a transmitir em ~300 kbps e sobe devagar, deixando a tela borrada nos
 // primeiros segundos. Esta dica no SDP faz ele começar já num bitrate decente.
 const BITRATE_INICIAL_KBPS = 2500;
+const PARAMETROS_OPUS = { stereo: 1, "sprop-stereo": 1, maxaveragebitrate: 128000, useinbandfec: 1 };
+
+// Restrições do áudio capturado. Os filtros de chamada de voz (cancelar eco, tirar ruído,
+// ajustar volume) cortam música e som de jogo, então vão desligados. restrictOwnAudio evita
+// capturar o som desta própria aba (as telas dos outros tocando aqui), que viraria eco.
+const AUDIO_DA_TELA = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 2,
+  restrictOwnAudio: true,
+  suppressLocalAudioPlayback: false,
+};
 const BITRATE_MINIMO = 250e3;
 const ESPERA_CONEXAO_DIRETA_MS = 7000;
 const FATIA_GRAVACAO_MS = 250;
@@ -60,6 +73,8 @@ const estado = {
   minhaTela: null,      // MediaStream da minha tela
   destaque: null,       // chave do bloco ampliado
   gravacao: null,       // plano B do meu lado: { recorder, mime, assinantes:Set, fila:Promise }
+  mudos: new Set(),     // telas que EU silenciei
+  somBloqueado: false,  // o navegador recusou tocar com som antes de um clique
   pares: new Map(),
   // id -> { pc, nome, polido, criandoOferta, ignorarOferta,
   //         fluxo, compartilhando,          (a tela DELE)
@@ -95,24 +110,38 @@ function restricoesDaTela(q) {
   return video;
 }
 
-// Acrescenta x-google-start-bitrate nos codecs de vídeo do SDP enviado. É lido pelo navegador
-// do OUTRO lado ao aplicar a descrição, e vale para o que ele enviar; como os dois lados fazem
-// isso, quem compartilha sempre recebe a dica. Navegadores que não conhecem o parâmetro o ignoram.
+// Ajusta o SDP enviado. Os parâmetros de formato (fmtp) são lidos pelo navegador do OUTRO lado
+// ao aplicar a descrição e valem para o que ele enviar; como os dois lados fazem isso, quem
+// compartilha sempre recebe as dicas. Navegadores que não conhecem um parâmetro o ignoram.
+//   - vídeo: x-google-start-bitrate, para começar nítido;
+//   - áudio (Opus): por padrão o WebRTC manda voz mono a ~32 kbps, que estraga música e som de
+//     jogo; aqui vira estéreo a 128 kbps.
 function ajustarSdp(descricao) {
   const linhas = descricao.sdp.split("\r\n");
-  let emVideo = false;
+  let secao = "";
   const tiposVideo = new Set();
+  const tiposOpus = new Set();
   for (const l of linhas) {
-    if (l.startsWith("m=")) emVideo = l.startsWith("m=video");
-    const m = emVideo && /^a=rtpmap:(\d+) (VP8|VP9|AV1|H264)\//i.exec(l);
-    if (m) tiposVideo.add(m[1]);
+    if (l.startsWith("m=")) secao = l.slice(2, 7);
+    const v = secao === "video" && /^a=rtpmap:(\d+) (VP8|VP9|AV1|H264)\//i.exec(l);
+    if (v) tiposVideo.add(v[1]);
+    const a = secao === "audio" && /^a=rtpmap:(\d+) opus\//i.exec(l);
+    if (a) tiposOpus.add(a[1]);
   }
+  const acrescentar = (linha, params) => {
+    for (const [chave, valor] of Object.entries(params)) {
+      if (!new RegExp(`[; ]${chave}=`).test(linha)) linha += `;${chave}=${valor}`;
+    }
+    return linha;
+  };
   const comFmtp = new Set();
   const saida = linhas.map((l) => {
     const m = /^a=fmtp:(\d+) (.*)$/.exec(l);
-    if (!m || !tiposVideo.has(m[1])) return l;
+    if (!m) return l;
+    if (tiposOpus.has(m[1])) return acrescentar(l, PARAMETROS_OPUS);
+    if (!tiposVideo.has(m[1])) return l;
     comFmtp.add(m[1]);
-    return l.includes("x-google-start-bitrate") ? l : `${l};x-google-start-bitrate=${BITRATE_INICIAL_KBPS}`;
+    return acrescentar(l, { "x-google-start-bitrate": BITRATE_INICIAL_KBPS });
   });
   const final = [];
   for (const l of saida) {
@@ -140,12 +169,12 @@ function preferirCodecs(transceptor, q) {
 }
 
 let temporizadorToast = null;
-function toast(texto) {
+function toast(texto, duracaoMs = 2200) {
   const el = $("aviso-flutuante");
   el.textContent = texto;
   el.classList.add("visivel");
   clearTimeout(temporizadorToast);
-  temporizadorToast = setTimeout(() => el.classList.remove("visivel"), 2200);
+  temporizadorToast = setTimeout(() => el.classList.remove("visivel"), duracaoMs);
 }
 
 function corDoNome(nome) {
@@ -349,7 +378,7 @@ function alimentarRelay(par) {
     const folga = fim - video.currentTime;
     if (folga > ATRASO_MAXIMO_S) video.currentTime = fim - FOLGA_RELAY_S;
     // Só (re)começa a tocar com folga no buffer; tocar colado na borda faz o player travar a cada pedaço.
-    if (video.paused && folga >= FOLGA_RELAY_S) video.play().catch(() => {});
+    if (video.paused && folga >= FOLGA_RELAY_S) tocar(video);
     // Descarta o que já passou para não encher a memória.
     const inicio = r.sb.buffered.start(0);
     if (video.currentTime - inicio > 30) { r.sb.remove(inicio, video.currentTime - 10); return; }
@@ -394,7 +423,7 @@ function reiniciarGravacao() {
   const recorder = new MediaRecorder(estado.minhaTela, {
     mimeType: mime,
     videoBitsPerSecond: qualidadeAtual().gravacao,
-    audioBitsPerSecond: 96e3,
+    audioBitsPerSecond: 128e3,
   });
   g.recorder = recorder;
   g.mime = mime;
@@ -538,13 +567,13 @@ function conectar(reconectando) {
         const par = criarPar(p.id, p.nome);
         par.compartilhando = p.compartilhando;
       }
-      if (estado.minhaTela) sinal("estado", { compartilhando: true });
+      if (estado.minhaTela) sinal("estado", estadoDoMeuCompartilhamento());
       mostrar($("aviso-conexao"), false);
       abrirSala();
     },
     entrou({ id, nome }) {
       criarPar(id, nome);
-      if (estado.minhaTela) sinal("estado", { compartilhando: true }, id);
+      if (estado.minhaTela) sinal("estado", estadoDoMeuCompartilhamento(), id);
       desenharPessoas();
       toast(`${nome} entrou na sala`);
     },
@@ -570,6 +599,7 @@ function conectar(reconectando) {
         if (!par) return;
         const antes = par.compartilhando;
         par.compartilhando = Boolean(dados && dados.compartilhando);
+        par.temAudio = Boolean(dados && dados.audio);
         if (!par.compartilhando) {
           par.euPausei = false; // próxima vez começa assistindo
           if (par.relay) desligarRelay(de, par);
@@ -630,6 +660,10 @@ function atualizarBotaoCompartilhar() {
   }));
 }
 
+function estadoDoMeuCompartilhamento() {
+  return { compartilhando: Boolean(estado.minhaTela), audio: Boolean(estado.minhaTela?.getAudioTracks().length) };
+}
+
 async function compartilhar() {
   if (estado.minhaTela) return pararCompartilhar();
   if (!navigator.mediaDevices?.getDisplayMedia) {
@@ -639,19 +673,30 @@ async function compartilhar() {
   const q = qualidadeAtual();
   let tela;
   try {
+    const querAudio = $("com-audio").checked;
     tela = await navigator.mediaDevices.getDisplayMedia({
       video: restricoesDaTela(q),
-      audio: $("com-audio").checked,
+      audio: querAudio ? AUDIO_DA_TELA : false,
+      // Opções do seletor do Chrome/Edge (os outros navegadores ignoram):
+      systemAudio: "include",        // oferece o áudio do sistema ao escolher "Tela inteira"
+      windowAudio: "system",         // e ao escolher uma janela, onde o navegador suportar
+      selfBrowserSurface: "exclude", // não oferece esta própria aba (daria espelho infinito)
+      surfaceSwitching: "include",   // permite trocar o que está compartilhando sem parar
     });
   } catch {
     return; // cancelou a escolha
+  }
+  const faixaAudio = tela.getAudioTracks()[0];
+  if (faixaAudio) faixaAudio.contentHint = "music";
+  if ($("com-audio").checked && !faixaAudio) {
+    toast("Sua tela foi sem som. Para ir com som, no Chrome ou Edge escolha \"Tela inteira\" ou uma \"Aba\" e deixe ligado \"Compartilhar áudio\". Janelas avulsas e o Firefox não mandam som.", 9000);
   }
   estado.minhaTela = tela;
   tela.getVideoTracks()[0].contentHint = q.dica;
   // O botão "Parar compartilhamento" do próprio navegador encerra a faixa.
   tela.getVideoTracks()[0].addEventListener("ended", pararCompartilhar);
   for (const par of estado.pares.values()) { par.elePausou = false; enviarTelaPara(par); }
-  sinal("estado", { compartilhando: true });
+  sinal("estado", estadoDoMeuCompartilhamento());
   atualizarBotaoCompartilhar();
   desenharPessoas();
   desenharBlocos();
@@ -686,6 +731,31 @@ function alternarPausa(id) {
   sinal("assistir", { ativo: !par.euPausei }, id);
   if (par.euPausei && par.relay) desligarRelay(id, par);
   desenharBlocos();
+}
+
+// ---------- Som ----------
+// Navegadores só tocam vídeo com som depois de um clique na página. Normalmente o clique em
+// "Entrar na sala" basta; se mesmo assim recusarem, toca sem som e mostra "Ativar som".
+function tocar(video) {
+  video.play().catch((e) => {
+    if (e?.name !== "NotAllowedError" || video.muted) return;
+    estado.somBloqueado = true;
+    video.muted = true;
+    video.play().catch(() => {});
+    mostrar($("btn-ativar-som"), true);
+  });
+}
+
+function ativarSom() {
+  estado.somBloqueado = false;
+  mostrar($("btn-ativar-som"), false);
+  desenharBlocos();
+  for (const v of document.querySelectorAll(".bloco video")) if (!v.muted && v.paused && !v.dataset.url) tocar(v);
+}
+
+function alternarMudo(chave) {
+  if (estado.mudos.has(chave)) estado.mudos.delete(chave); else estado.mudos.add(chave);
+  if (estado.somBloqueado) ativarSom(); else desenharBlocos();
 }
 
 // ---------- Desenho ----------
@@ -736,9 +806,11 @@ function criarBloco(chave) {
   const acoes = document.createElement("div");
   acoes.className = "acoes-bloco";
   if (chave !== "eu") {
+    const som = botaoIcone("som", "Silenciar esta tela", () => alternarMudo(chave));
+    som.classList.add("btn-som");
     const b = botaoIcone("pausa", "Pausar esta tela", () => alternarPausa(chave));
     b.classList.add("btn-pausa");
-    acoes.appendChild(b);
+    acoes.append(som, b);
   }
   acoes.append(
     botaoIcone("ampliar", "Destacar", () => { estado.destaque = estado.destaque === chave ? null : chave; desenharBlocos(); }),
@@ -762,16 +834,33 @@ function atualizarBloco(bloco, d) {
     if (video.dataset.url) { delete video.dataset.url; video.removeAttribute("src"); video.load(); video.autoplay = true; }
     if (video.srcObject !== d.fluxo) {
       video.srcObject = d.fluxo;
-      video.play().catch(() => {});
+      tocar(video);
     }
   }
-  video.muted = d.eu;
-  video.controls = !d.eu && !d.pausado; // dá a quem assiste o controle de volume do áudio compartilhado
+  // A minha própria tela fica sempre muda aqui: eu já ouço o som no meu PC.
+  const mudo = d.eu || estado.mudos.has(bloco.dataset.chave) || estado.somBloqueado;
+  if (video.muted !== mudo) video.muted = mudo;
+  video.controls = !d.eu && !d.pausado && d.audio; // controle de volume, quando há som
+
+  const btnSom = bloco.querySelector(".btn-som");
+  if (btnSom) {
+    mostrar(btnSom, Boolean(d.audio));
+    const titulo = mudo ? "Ativar o som desta tela" : "Silenciar esta tela";
+    btnSom.title = titulo;
+    btnSom.setAttribute("aria-label", titulo);
+    btnSom.replaceChildren(icone(mudo ? "mudo" : "som"));
+  }
 
   const legenda = bloco.querySelector(".legenda");
   const nome = Object.assign(document.createElement("span"), { className: "nome", textContent: d.rotulo });
   const filhos = [avatar(d.nomeAvatar), nome];
   if (d.selo) filhos.push(Object.assign(document.createElement("span"), { className: "selo " + d.selo.classe, textContent: d.selo.texto, title: d.selo.dica || "" }));
+  // Diz se a tela tem som, para ninguém ficar procurando volume numa tela que foi sem áudio.
+  const selo = document.createElement("span");
+  selo.className = "selo som" + (d.audio ? "" : " sem");
+  selo.title = d.audio ? "Esta tela está com som" : "Esta tela foi compartilhada sem som";
+  selo.appendChild(icone(d.audio ? "som" : "mudo"));
+  filhos.push(selo);
   legenda.replaceChildren(...filhos);
 
   bloco.classList.toggle("destaque", estado.destaque === bloco.dataset.chave);
@@ -796,7 +885,7 @@ function atualizarBloco(bloco, d) {
 }
 
 function descreverTela(par) {
-  const base = { rotulo: par.nome, nomeAvatar: par.nome, eu: false, pausado: par.euPausei };
+  const base = { rotulo: par.nome, nomeAvatar: par.nome, eu: false, pausado: par.euPausei, audio: par.temAudio };
   if (par.euPausei) {
     return { ...base, sobreposicao: { titulo: "Pausado", texto: "Clique para voltar a assistir" } };
   }
@@ -817,6 +906,7 @@ function desenharBlocos() {
   const desejados = new Map();
   if (estado.minhaTela) {
     desejados.set("eu", { rotulo: "Sua tela", nomeAvatar: estado.nome, fluxo: estado.minhaTela, eu: true,
+      audio: estado.minhaTela.getAudioTracks().length > 0,
       selo: { classe: "vivo", texto: "AO VIVO" } });
   }
   for (const [id, par] of estado.pares) if (par.compartilhando) desejados.set(id, descreverTela(par));
@@ -857,6 +947,13 @@ $("sel-upload").addEventListener("change", () => { gravarLocal("upload", $("sel-
 
 $("form-entrada").addEventListener("submit", (e) => { e.preventDefault(); mostrar($("erro-entrada"), false); entrar(); });
 $("btn-compartilhar").addEventListener("click", compartilhar);
+$("btn-ativar-som").addEventListener("click", ativarSom);
+// Áudio vem ligado por padrão; a escolha fica guardada.
+$("com-audio").checked = lerLocal("audio") !== "nao";
+$("com-audio").addEventListener("change", () => {
+  gravarLocal("audio", $("com-audio").checked ? "sim" : "nao");
+  if (estado.minhaTela) toast("Vale a partir do próximo compartilhamento. Pare e compartilhe de novo para mudar o som.", 4500);
+});
 $("btn-sair").addEventListener("click", sair);
 $("btn-copiar").addEventListener("click", async () => {
   const url = new URL(location.href);

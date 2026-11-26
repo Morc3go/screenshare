@@ -132,6 +132,9 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--acento-
 .selo.direto { background: rgba(47, 210, 122, .18); color: #7ff0b4; }
 .selo.servidor { background: rgba(255, 179, 71, .18); color: #ffd08f; }
 .selo.vivo { background: var(--ao-vivo); color: #fff; }
+.selo.som { display: inline-grid; place-items: center; padding: 2px 5px; background: rgba(255,255,255,.12); color: #fff; }
+.selo.som.sem { color: #8d96a8; }
+.selo.som svg { width: 14px; height: 14px; }
 
 .acoes-bloco { position: absolute; right: 10px; top: 10px; z-index: 2; display: flex; gap: 6px; opacity: 0; transform: translateY(-4px);
   transition: opacity .15s, transform .15s; }

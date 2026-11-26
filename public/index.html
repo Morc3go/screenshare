@@ -18,6 +18,8 @@
   <symbol id="i-pausa" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></symbol>
   <symbol id="i-ampliar" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></symbol>
+  <symbol id="i-som" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></symbol>
+  <symbol id="i-mudo" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 10l4 4M21 10l-4 4"/></symbol>
   <symbol id="i-cheia" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
 </svg>
 
@@ -73,9 +75,10 @@
       <span>Seu upload</span>
       <select id="sel-upload"></select>
     </label>
-    <label class="chave" title="Chrome e Edge. No Windows: tela inteira ou aba. No macOS: só aba.">
-      <input type="checkbox" id="com-audio"><span class="trilho"></span><span>Incluir áudio</span>
+    <label class="chave" title="Chrome e Edge: escolha Tela inteira ou Aba e deixe ligado Compartilhar áudio. No macOS, só Aba. O Firefox não manda som.">
+      <input type="checkbox" id="com-audio" checked><span class="trilho"></span><span>Incluir áudio</span>
     </label>
+    <button class="btn fantasma oculto" id="btn-ativar-som" type="button"><svg><use href="#i-som"/></svg><span>Ativar som</span></button>
     <span class="info-envio" id="info-envio"></span>
   </div>
 

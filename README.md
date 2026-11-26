@@ -67,8 +67,11 @@ que o app é aberto.
 - **Pausar** numa tela: você para de receber essa tela, e quem compartilha para de enviar
   para você, sobrando banda para os outros.
 - **Destacar**: amplia uma tela no topo. **Tela cheia**: ocupa o monitor.
-- **Incluir áudio**: transmite o som (Chrome/Edge; no Windows com tela inteira ou aba, no
-  macOS só aba).
+- **Som**: vem ligado (**Incluir áudio**). Para a tela ir com som, no Chrome ou Edge escolha
+  **Tela inteira** ou uma **Aba** e deixe marcado **Compartilhar áudio** no seletor. Janelas
+  avulsas e o Firefox não mandam som; o site avisa quando a tela saiu sem som. Cada tela mostra um
+  ícone de alto-falante (com ou sem som) e tem botão para silenciar só ela. O som vai em estéreo,
+  com qualidade de música, sem os filtros de chamada de voz que cortam música e jogo.
 
 ## Qualidade da imagem
 
