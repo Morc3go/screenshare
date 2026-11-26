@@ -232,7 +232,9 @@ function iniciarServidor(opcoes = {}) {
 
   return new Promise((resolve, reject) => {
     servidor.once("error", reject);
-    servidor.listen(opcoes.porta ?? 3000, () => {
+    // Por padrão só o próprio PC conecta (127.0.0.1): os amigos chegam pelo túnel, que também roda
+    // aqui. Assim o Firewall do Windows não precisa liberar nada nem pergunta ao abrir o app.
+    servidor.listen(opcoes.porta ?? 3000, opcoes.host ?? "127.0.0.1", () => {
       servidor.off("error", reject);
       resolve({ porta: servidor.address().port, fechar, resumo });
     });
@@ -249,6 +251,7 @@ if (require.main === module) {
     porta: Number(process.env.PORTA || process.env.PORT || 3000),
     obterSenha: () => senha,
     maxPorSala: Number(process.env.MAX_POR_SALA || 10),
+    host: process.env.HOST || "127.0.0.1", // HOST=0.0.0.0 para aceitar outros PCs da rede local
     log: (t) => console.log(`[${hora()}] ${t}`),
   }).then(({ porta }) => {
     console.log(`\nCompartilha Tela rodando em http://localhost:${porta}`);

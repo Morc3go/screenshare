@@ -60,6 +60,13 @@ function baixar(url, destino, aoProgresso, redirecionamentos = 0) {
 }
 
 async function obterExecutavel(pastaDados, aoProgresso) {
+  // 1) O que vem dentro do instalador (Windows): evita baixar um executável na primeira vez,
+  //    comportamento que antivírus costumam estranhar.
+  if (process.resourcesPath) {
+    const embutido = path.join(process.resourcesPath, "bin", process.platform === "win32" ? "cloudflared.exe" : "cloudflared");
+    if (fs.existsSync(embutido) && (await testarExecutavel(embutido))) return embutido;
+  }
+  // 2) Um cloudflared já instalado no PC. 3) Baixar da página oficial da Cloudflare.
   if (await testarExecutavel("cloudflared")) return "cloudflared";
 
   const pasta = path.join(pastaDados, "bin");
@@ -114,7 +121,7 @@ class Tunel extends EventEmitter {
     if (this.parando) return;
     this.mudar({ fase: "conectando" });
 
-    const proc = spawn(exe, ["tunnel", "--no-autoupdate", "--url", `http://localhost:${porta}`], { windowsHide: true });
+    const proc = spawn(exe, ["tunnel", "--no-autoupdate", "--url", `http://127.0.0.1:${porta}`], { windowsHide: true });
     this.processo = proc;
     let urlEncontrada = null;
     const lerSaida = (pedaco) => {

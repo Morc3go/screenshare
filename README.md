@@ -23,11 +23,31 @@ Baixe o instalador na página de **[Releases](../../releases/latest)**:
 
 O app **não tem assinatura de código**, então o sistema vai reclamar na primeira vez:
 
-- **Windows** (SmartScreen, "O Windows protegeu o computador"): clique em **Mais informações → Executar assim mesmo**.
+- **Windows** (SmartScreen, "O Windows protegeu o computador"): clique em **Mais informações →
+  Executar assim mesmo**. As atualizações automáticas seguintes não mostram esse aviso.
 - **macOS** ("não pode ser aberto porque é de um desenvolvedor não identificado"): clique com o
   botão direito no app → **Abrir** → **Abrir**. Se disser que o app "está danificado", rode
   `xattr -cr "/Applications/Compartilha Tela.app"` no Terminal.
 - **Linux**: `chmod +x CompartilhaTela-*.AppImage` e abra.
+
+### Windows: segurança
+
+- **Firewall**: o app só aceita conexões do próprio PC (os amigos chegam pelo túnel, que também
+  roda no seu PC), então o Firewall do Windows não precisa liberar nada.
+- **Antivírus**: o `cloudflared` (o programa da Cloudflare que cria o link) já vem dentro do
+  instalador, em vez de ser baixado na primeira vez.
+- **SmartScreen / Controle Inteligente de Aplicativos**: o aviso some de vez só com uma
+  **assinatura de código**. Sem ela, o SmartScreen avisa até o app ganhar "reputação" (muitos
+  downloads), e o *Controle Inteligente de Aplicativos* do Windows 11, se estiver ligado, bloqueia
+  apps sem assinatura sem dar a opção "Executar assim mesmo". Caminhos para assinar:
+  - **SignPath Foundation**: assinatura **gratuita** para projetos de código aberto (este
+    repositório é público e MIT). É preciso se inscrever e ser aprovado;
+  - **Azure Artifact Signing** (antigo *Trusted Signing*), da Microsoft: pago, por mês. Confira
+    se está disponível para pessoa física no Brasil;
+  - certificado de assinatura comprado de uma autoridade certificadora: o mais caro.
+
+  Com qualquer um deles, é só colocar as credenciais nos *secrets* do repositório e ligar a
+  assinatura no workflow.
 
 ## Atualizações
 
@@ -67,9 +87,9 @@ que o app é aberto.
   fps"). Quem compartilha vê embaixo dos controles o que está enviando, se a codificação está na
   placa de vídeo e, se o fps estiver baixo, **o motivo**: processador ou internet. Quando o envio
   está limitado, o selo da tela fica laranja com ⚠ para quem assiste também; clique nele para ver.
-- **Seu upload**: informe a velocidade de **upload** da sua internet (em [fast.com](https://fast.com),
-  clique em "Mais informações"). O app usa 80% dela para a tela. Quanto maior, mais nítida sua
-  tela chega para os outros. O padrão é 50 Mbps.
+- **Seu upload**: deixe em **Automático** (padrão). O app observa o atraso da conexão e, quando
+  o upload começa a encher (o que deixa o resto da internet ruim: jogo, Discord, navegação), corta
+  o envio na hora e volta a subir aos poucos. Se preferir, escolha um valor fixo; o app usa 70% dele.
 - **Pausar** numa tela: você para de receber essa tela, e quem compartilha para de enviar
   para você, sobrando banda para os outros.
 - **Destacar**: amplia uma tela no topo. **Tela cheia**: ocupa o monitor.
@@ -80,6 +100,12 @@ que o app é aberto.
   Cada tela tem um medidor de som: na sua, mostra se o som está saindo; nas dos outros, se está
   chegando. Se sua tela estiver com som ligado mas muda por 20 s, o site avisa (volume do Windows
   no mudo, ou o jogo tocando num dispositivo que não é o padrão do Windows).
+- **Volume de cada tela**: botão de mudo e barra de volume no canto de cada tela.
+- **Tela cheia**: botão no canto ou clique duplo no vídeo. Com o mouse parado por 2,5 s, a legenda,
+  os botões e o cursor somem; mexeu o mouse, voltam.
+- **Aba escondida**: se você deixar a aba do site escondida (jogando, por exemplo), depois de 5 s
+  o site para de receber o vídeo das telas e mantém só o som. Isso alivia seu PC e o upload de
+  quem compartilha. Voltou para a aba, o vídeo volta.
 - **Reforçar volume** (ligado por padrão): som de jogo capturado do sistema costuma sair baixo.
   Com isso ligado, o som baixo sobe até uns 12 dB e um limitador impede o alto de estourar. Dá
   para ligar e desligar durante o compartilhamento.

@@ -42,6 +42,16 @@ jobs:
 
       - run: npm ci
 
+      # No Windows o cloudflared vai dentro do instalador (assinado pela própria Cloudflare), para o
+      # app não precisar baixar um executável na primeira vez, o que antivírus costumam estranhar.
+      - name: Embutir o cloudflared (Windows)
+        if: matrix.nome == 'windows'
+        shell: bash
+        run: |
+          mkdir -p build/bin
+          curl -fsSL -o build/bin/cloudflared.exe https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
+          ls -l build/bin
+
       - name: Gerar instaladores
         run: npx electron-builder ${{ matrix.alvo }} --publish never
         env:

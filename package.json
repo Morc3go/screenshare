@@ -1,7 +1,7 @@
 {
   "name": "compartilha-tela",
   "productName": "Compartilha Tela",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "Compartilhe a tela com até 10 amigos pelo navegador (WebRTC), direto do seu PC.",
   "main": "desktop/main.js",
   "scripts": {
@@ -38,7 +38,13 @@
         "nsis",
         "portable"
       ],
-      "icon": "build/icone.png"
+      "icon": "build/icone.png",
+      "extraResources": [
+        {
+          "from": "build/bin/cloudflared.exe",
+          "to": "bin/cloudflared.exe"
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,

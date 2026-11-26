@@ -126,6 +126,13 @@ input[type=text]:focus, input[type=password]:focus { border-color: var(--acento-
 @keyframes surgir { from { opacity: 0; transform: scale(.98); } }
 .bloco video { width: 100%; height: 100%; object-fit: contain; display: block; background: var(--video); }
 .bloco:fullscreen { border-radius: 0; border: 0; }
+/* Tela cheia com o mouse parado: some tudo que fica por cima do vídeo, e o cursor também. */
+.bloco:fullscreen .legenda, .bloco:fullscreen .acoes-bloco { transition: opacity .3s; }
+.bloco:fullscreen:not(.ocioso) .acoes-bloco { opacity: 1; transform: none; }
+.bloco:fullscreen.ocioso .legenda, .bloco:fullscreen.ocioso .acoes-bloco { opacity: 0; pointer-events: none; }
+.bloco:fullscreen.ocioso { cursor: none; }
+.acoes-bloco .volume { width: 90px; height: 34px; padding: 0 10px; border-radius: 10px; background: rgba(5, 6, 10, .72);
+  backdrop-filter: blur(8px); accent-color: var(--acento-2); cursor: pointer; }
 
 .legenda { position: absolute; left: 10px; bottom: 10px; z-index: 2; display: flex; align-items: center; gap: 8px;
   padding: 4px 10px 4px 4px; border-radius: 999px; background: rgba(5, 6, 10, .72); backdrop-filter: blur(8px);

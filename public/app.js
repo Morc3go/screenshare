@@ -34,18 +34,28 @@ const FORCAR_SERVIDOR = new URLSearchParams(location.search).has("so_servidor");
 // travam a resolução, que é o motivo de escolhê-los. "Fluidez máxima" trava os 60 fps.
 // 4K e 1440p só saem se o monitor tiver essa resolução (a captura não aumenta a imagem).
 const QUALIDADES = {
-  fullhd:      { nome: "Full HD (1080p, 60 fps)",               altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 4e6,  gravacao: 8e6,  codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "balanced" },
-  equilibrado: { nome: "Quad HD (1440p, 60 fps)",               altura: 1440, fps: 60, dica: "motion", maximo: 20e6, recomendado: 7e6,  gravacao: 12e6, codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "maintain-resolution" },
-  uhd:         { nome: "4K (2160p, 60 fps)",                    altura: 2160, fps: 60, dica: "motion", maximo: 40e6, recomendado: 15e6, gravacao: 20e6, codecs: ["H264", "AV1", "VP9", "VP8"], degradacao: "maintain-resolution" },
-  movimento:   { nome: "Fluidez máxima (jogos rápidos, 60 fps)", altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 3e6,  gravacao: 8e6,  codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "maintain-framerate" },
-  texto:       { nome: "Texto nítido (resolução do monitor, 30 fps)", altura: null, fps: 30, dica: "detail", maximo: 12e6, recomendado: 3e6, gravacao: 6e6, codecs: ["VP9", "AV1", "H264", "VP8"], degradacao: "maintain-resolution" },
+  fullhd:      { nome: "Full HD (1080p, 60 fps)",               altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 4e6,  gravacao: 4e6,  codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "balanced" },
+  equilibrado: { nome: "Quad HD (1440p, 60 fps)",               altura: 1440, fps: 60, dica: "motion", maximo: 20e6, recomendado: 7e6,  gravacao: 6e6, codecs: ["H264", "VP9", "AV1", "VP8"], degradacao: "maintain-resolution" },
+  uhd:         { nome: "4K (2160p, 60 fps)",                    altura: 2160, fps: 60, dica: "motion", maximo: 40e6, recomendado: 15e6, gravacao: 10e6, codecs: ["H264", "AV1", "VP9", "VP8"], degradacao: "maintain-resolution" },
+  movimento:   { nome: "Fluidez máxima (jogos rápidos, 60 fps)", altura: 1080, fps: 60, dica: "motion", maximo: 12e6, recomendado: 3e6,  gravacao: 4e6,  codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "maintain-framerate" },
+  texto:       { nome: "Texto nítido (resolução do monitor, 30 fps)", altura: null, fps: 30, dica: "detail", maximo: 12e6, recomendado: 3e6, gravacao: 3e6, codecs: ["VP9", "AV1", "H264", "VP8"], degradacao: "maintain-resolution" },
   leve:        { nome: "Internet fraca (720p, 30 fps)",         altura: 720,  fps: 30, dica: "motion", maximo: 1.5e6, recomendado: 0,   gravacao: 1e6,  codecs: ["H264", "VP9", "VP8", "AV1"], degradacao: "balanced", orcamentoMax: 4e6 },
 };
 const QUALIDADE_PADRAO = "fullhd";
 // Upload que a pessoa diz ter; 80% dele vai para a tela, o resto fica para o resto da internet.
 const UPLOADS_MBPS = [5, 10, 20, 50, 100, 300, 500, 1000];
 const UPLOAD_PADRAO_MBPS = 50;
-const FRACAO_DO_UPLOAD = 0.8;
+const FRACAO_DO_UPLOAD = 0.7;
+// Upload automático: em vez de confiar num número que a pessoa chuta, o app observa o atraso
+// (RTT) das conexões. Quando o upload enche, os pacotes fazem fila no roteador e o atraso sobe, e
+// é isso que deixa o resto da internet (jogo, Discord, navegação) ruim. Então: atraso subiu,
+// corta o envio; ficou estável e o envio está batendo no teto, sobe devagar.
+const AUTO = {
+  inicial: 6e6, minimo: 1.5e6, maximo: 100e6,
+  atrasoToleradoS: 0.06,  // RTT acima do mínimo visto por mais que isso = fila se formando
+  corte: 0.75, subida: 1.15,
+  esperaParaSubirMs: 8000,
+};
 // O Chrome começa a transmitir em ~300 kbps e sobe devagar, deixando a tela borrada nos
 // primeiros segundos. Esta dica no SDP faz ele começar já num bitrate decente.
 const BITRATE_INICIAL_KBPS = 4000;
@@ -98,6 +108,9 @@ const NIVEL_MINIMO_SOM = 0.002; // RMS abaixo disso é silêncio
 const BITRATE_MINIMO = 250e3;
 const ESPERA_CONEXAO_DIRETA_MS = 7000;
 const FATIA_GRAVACAO_MS = 250;
+const OCIOSO_TELA_CHEIA_MS = 2500;
+// Aba escondida por mais que isso: para de receber o VÍDEO das telas (o som continua).
+const ESPERA_ABA_ESCONDIDA_MS = 5000;
 // Plano B: toca ~1 s atrás do "ao vivo" para ter folga contra oscilação; se acumular mais que
 // ATRASO_MAXIMO_S (aba em segundo plano, rede lenta), pula de volta para perto do ao vivo.
 const FOLGA_RELAY_S = 1.0;
@@ -117,9 +130,11 @@ const estado = {
   minhaTela: null,      // MediaStream da minha tela
   destaque: null,       // chave do bloco ampliado
   gravacao: null,       // plano B do meu lado: { recorder, mime, assinantes:Set, fila:Promise }
-  mudos: new Set(),
+  auto: { orcamento: 6e6, rttBase: new Map(), ultimoCorte: 0, bytesAntes: null, quandoAntes: 0 },
+  mudos: new Set(),     // telas que EU silenciei
+  volumes: new Map(),   // chave do bloco -> volume escolhido (0 a 1)
   avisoSom: null,       // null | "sem-faixa" | "silencio"
-  silencioDesde: 0,     // telas que EU silenciei
+  silencioDesde: 0,     // desde quando minha tela está sem som saindo
   somBloqueado: false,  // o navegador recusou tocar com som antes de um clique
   pares: new Map(),
   // id -> { pc, nome, polido, criandoOferta, ignorarOferta,
@@ -146,8 +161,43 @@ function qualidadeAtual() {
 }
 
 function orcamentoUpload() {
-  const total = (Number($("sel-upload").value) || UPLOAD_PADRAO_MBPS) * 1e6 * FRACAO_DO_UPLOAD;
+  const escolhido = $("sel-upload").value;
+  const total = escolhido === "auto" ? estado.auto.orcamento : (Number(escolhido) || UPLOAD_PADRAO_MBPS) * 1e6 * FRACAO_DO_UPLOAD;
   return Math.min(total, qualidadeAtual().orcamentoMax ?? Infinity);
+}
+
+// Chamado a cada 2 s enquanto compartilho (ver medirQualidadeRecebida).
+async function controlarUploadAutomatico() {
+  const a = estado.auto;
+  if ($("sel-upload").value !== "auto" || !estado.minhaTela) return;
+  const agora = Date.now();
+  let bytes = 0, congestionado = false, medidas = 0;
+  for (const [id, par] of estado.pares) {
+    if (!par.envios.length || par.pc.connectionState !== "connected") continue;
+    let stats;
+    try { stats = await par.pc.getStats(); } catch { continue; }
+    stats.forEach((x) => {
+      if (x.type === "outbound-rtp") bytes += x.bytesSent || 0;
+      if (x.type === "candidate-pair" && x.nominated && x.state === "succeeded" && typeof x.currentRoundTripTime === "number") {
+        medidas++;
+        // O menor atraso já visto é a referência "sem fila"; esquece devagar, caso a rota mude.
+        const base = Math.min(a.rttBase.get(id) ?? Infinity, x.currentRoundTripTime);
+        a.rttBase.set(id, base + 0.0005);
+        if (x.currentRoundTripTime - base > AUTO.atrasoToleradoS) congestionado = true;
+      }
+    });
+  }
+  const taxa = a.bytesAntes != null && a.quandoAntes ? ((bytes - a.bytesAntes) * 8) / ((agora - a.quandoAntes) / 1000) : 0;
+  a.bytesAntes = bytes; a.quandoAntes = agora;
+  if (!medidas) return;
+  const antes = a.orcamento;
+  if (congestionado) {
+    a.orcamento = Math.max(AUTO.minimo, Math.min(a.orcamento, taxa || a.orcamento) * AUTO.corte);
+    a.ultimoCorte = agora;
+  } else if (agora - a.ultimoCorte > AUTO.esperaParaSubirMs && taxa > a.orcamento * 0.8) {
+    a.orcamento = Math.min(AUTO.maximo, a.orcamento * AUTO.subida);
+  }
+  if (Math.abs(a.orcamento - antes) > 1) ajustarQualidade();
 }
 
 function restricoesDaTela(q) {
@@ -192,6 +242,7 @@ async function medirQualidadeRecebida() {
   // por que está limitado, e se é a placa de vídeo que codifica.
   let textoMinha = "";
   if (estado.minhaTela) {
+    await controlarUploadAutomatico();
     let pior = null;
     for (const par of estado.pares.values()) {
       if (!par.envios.length || par.elePausou || par.pc.connectionState !== "connected") continue;
@@ -392,14 +443,43 @@ async function tratarIce(id, candidato) {
 }
 
 // Alguém pausou/voltou a assistir a MINHA tela.
-async function tratarPedidoAssistir(id, ativo) {
+// `video: false` = continua mandando o som, só não o vídeo (a pessoa está com a aba escondida).
+async function tratarPedidoAssistir(id, ativo, video = true) {
   const par = estado.pares.get(id);
   if (!par) return;
   par.elePausou = !ativo;
+  par.eleSemVideo = ativo && !video;
   for (const { sender, track } of par.envios) {
-    try { await sender.replaceTrack(ativo && estado.minhaTela ? track : null); } catch (e) { console.warn(e); }
+    const mandar = ativo && estado.minhaTela && (track.kind === "audio" || video);
+    try { await sender.replaceTrack(mandar ? track : null); } catch (e) { console.warn(e); }
   }
   ajustarQualidade();
+}
+
+// Quem está com a aba do site escondida (jogando, por exemplo) não vê as telas, mas o navegador
+// continuaria baixando e decodificando o vídeo de cada uma, o que pesa no PC (e no upload de quem
+// compartilha). Depois de alguns segundos escondida, pede só o som; ao voltar, pede o vídeo de novo.
+let temporizadorAbaEscondida = null;
+function aoMudarVisibilidade() {
+  clearTimeout(temporizadorAbaEscondida);
+  if (document.hidden) {
+    temporizadorAbaEscondida = setTimeout(() => {
+      if (!document.hidden || document.pictureInPictureElement) return;
+      for (const [id, par] of estado.pares) {
+        if (!par.compartilhando || par.euPausei || par.relay || par.videoSuspenso) continue;
+        par.videoSuspenso = true;
+        sinal("assistir", { ativo: true, video: false }, id);
+      }
+    }, ESPERA_ABA_ESCONDIDA_MS);
+  } else {
+    for (const [id, par] of estado.pares) {
+      if (!par.videoSuspenso) continue;
+      par.videoSuspenso = false;
+      par.desdeFalha = null; // o vídeo leva um instante para voltar; não é falha de conexão
+      sinal("assistir", { ativo: !par.euPausei, video: true }, id);
+    }
+    desenharBlocos();
+  }
 }
 
 // A conexão direta com quem compartilha está entregando vídeo?
@@ -417,6 +497,8 @@ function verificarConexoes() {
       if (par.relay) desligarRelay(id, par);
       continue;
     }
+    // Vídeo suspenso por aba escondida: sem vídeo chegando de propósito, não é falha.
+    if (par.videoSuspenso) { par.desdeFalha = null; continue; }
     if (conexaoDiretaOk(par)) {
       par.desdeFalha = null;
       if (par.relay) { desligarRelay(id, par); desenharBlocos(); }
@@ -597,7 +679,7 @@ async function ajustarQualidade() {
   const q = qualidadeAtual();
   const viaServidor = estado.gravacao?.assinantes.size || 0;
   const recebendo = [...estado.pares.entries()]
-    .filter(([id, p]) => p.envios.length && !p.elePausou && !estado.gravacao?.assinantes.has(id))
+    .filter(([id, p]) => p.envios.length && !p.elePausou && !p.eleSemVideo && !estado.gravacao?.assinantes.has(id))
     .map(([, p]) => p);
   // Quem recebe via servidor também sai do meu upload (uma cópia da gravação, não importa quantos).
   const orcamento = orcamentoUpload() - (viaServidor ? q.gravacao : 0);
@@ -632,9 +714,14 @@ async function ajustarQualidade() {
   const partes = [];
   if (n) partes.push(`${n} ${n === 1 ? "pessoa" : "pessoas"} direto · até ${mbps(porPessoa)} cada`);
   if (viaServidor) partes.push(`${viaServidor} via servidor`);
+  const soOuvindo = [...estado.pares.values()].filter((p) => p.envios.length && p.eleSemVideo).length;
+  if (soOuvindo) partes.push(`${soOuvindo} só ouvindo (com a aba do site escondida)`);
   let texto = partes.length ? "Assistindo você: " + partes.join(" · ") : "Ninguém assistindo sua tela ainda";
+  if ($("sel-upload").value === "auto" && n) texto += ` · upload automático: usando até ${mbps(orcamento)}`;
   if (n && porPessoa < q.recomendado) {
-    texto += ` — pouco para ${q.nome.split(" (")[0]} (ideal: ${mbps(q.recomendado)} por pessoa). Se sua internet aguentar, aumente "Seu upload"; senão, use uma qualidade menor.`;
+    texto += $("sel-upload").value === "auto"
+      ? ` — sua internet só comporta ${mbps(porPessoa)} por pessoa agora, pouco para ${q.nome.split(" (")[0]} (ideal: ${mbps(q.recomendado)}). Uma qualidade menor fica mais fluida.`
+      : ` — pouco para ${q.nome.split(" (")[0]} (ideal: ${mbps(q.recomendado)} por pessoa). Se sua internet aguentar, aumente "Seu upload"; senão, use uma qualidade menor.`;
   }
   info.textContent = texto;
 }
@@ -717,7 +804,7 @@ function conectar(reconectando) {
     async sinal({ de, tipo, dados }) {
       if (tipo === "sdp") await tratarSdp(de, dados);
       else if (tipo === "ice") await tratarIce(de, dados);
-      else if (tipo === "assistir") await tratarPedidoAssistir(de, Boolean(dados && dados.ativo));
+      else if (tipo === "assistir") await tratarPedidoAssistir(de, Boolean(dados && dados.ativo), dados?.video !== false);
       else if (tipo === "relay") tratarPedidoRelay(de, Boolean(dados && dados.ativo));
       else if (tipo === "desempenho") {
         const par = estado.pares.get(de);
@@ -1108,6 +1195,21 @@ function criarBloco(chave) {
   if (chave !== "eu") {
     const som = botaoIcone("som", "Silenciar esta tela", () => alternarMudo(chave));
     som.classList.add("btn-som");
+    // Volume desta tela. Fica no site (e não no player do navegador) para existir um controle só:
+    // antes o player e o botão do site guardavam estados diferentes e um desfazia o outro.
+    const volume = Object.assign(document.createElement("input"), {
+      type: "range", min: "0", max: "1", step: "0.05", className: "volume", title: "Volume desta tela",
+    });
+    volume.setAttribute("aria-label", "Volume desta tela");
+    volume.value = String(estado.volumes.get(chave) ?? 1);
+    volume.addEventListener("input", () => {
+      estado.volumes.set(chave, Number(volume.value));
+      // Subir o volume de uma tela silenciada tira o silêncio, como em qualquer player.
+      if (Number(volume.value) > 0) estado.mudos.delete(chave);
+      if (estado.somBloqueado) ativarSom(); else desenharBlocos();
+    });
+    volume.addEventListener("click", (e) => e.stopPropagation());
+    acoes.append(volume);
     const b = botaoIcone("pausa", "Pausar esta tela", () => alternarPausa(chave));
     b.classList.add("btn-pausa");
     acoes.append(som, b);
@@ -1117,6 +1219,18 @@ function criarBloco(chave) {
     botaoIcone("cheia", "Tela cheia", () => (document.fullscreenElement ? document.exitFullscreen() : bloco.requestFullscreen?.())),
   );
   bloco.append(video, legenda, sobre, acoes);
+  // Mouse parado por um tempo: legenda, botões e cursor somem (só faz diferença em tela cheia,
+  // ver estilo.css). Mexeu o mouse ou tocou, volta.
+  let temporizador = null;
+  const acordar = () => {
+    bloco.classList.remove("ocioso");
+    clearTimeout(temporizador);
+    temporizador = setTimeout(() => bloco.classList.add("ocioso"), OCIOSO_TELA_CHEIA_MS);
+  };
+  for (const ev of ["mousemove", "pointerdown", "touchstart", "keydown"]) bloco.addEventListener(ev, acordar, { passive: true });
+  bloco.addEventListener("fullscreenchange", acordar);
+  // Clique duplo no vídeo entra e sai da tela cheia, como nos players de vídeo.
+  video.addEventListener("dblclick", () => (document.fullscreenElement ? document.exitFullscreen() : bloco.requestFullscreen?.()));
   return bloco;
 }
 
@@ -1140,7 +1254,14 @@ function atualizarBloco(bloco, d) {
   // A minha própria tela fica sempre muda aqui: eu já ouço o som no meu PC.
   const mudo = d.eu || estado.mudos.has(bloco.dataset.chave) || estado.somBloqueado;
   if (video.muted !== mudo) video.muted = mudo;
-  video.controls = !d.eu && !d.pausado && d.audio; // controle de volume, quando há som
+  const volumeDesejado = estado.volumes.get(bloco.dataset.chave) ?? 1;
+  if (video.volume !== volumeDesejado) video.volume = volumeDesejado;
+  video.controls = false; // controles do site (mudo + volume); ver criarBloco
+  const barraVolume = bloco.querySelector(".volume");
+  if (barraVolume) {
+    mostrar(barraVolume, Boolean(d.audio));
+    if (document.activeElement !== barraVolume) barraVolume.value = String(mudo ? 0 : volumeDesejado);
+  }
 
   const btnSom = bloco.querySelector(".btn-som");
   if (btnSom) {
@@ -1273,8 +1394,11 @@ for (const mb of UPLOADS_MBPS) {
   op.textContent = mb >= 1000 ? "1 Gbps" : `${mb} Mbps`;
   $("sel-upload").appendChild(op);
 }
-$("sel-upload").value = UPLOADS_MBPS.includes(Number(lerLocal("upload"))) ? lerLocal("upload") : String(UPLOAD_PADRAO_MBPS);
-$("sel-upload").addEventListener("change", () => { gravarLocal("upload", $("sel-upload").value); ajustarQualidade(); });
+// "Automático" vem primeiro e é o padrão. A chave nova ("upload-v2") descarta o valor guardado
+// das versões em que o padrão era 50 Mbps, que podia ser mais que a internet real e saturá-la.
+$("sel-upload").prepend(Object.assign(document.createElement("option"), { value: "auto", textContent: "Automático" }));
+$("sel-upload").value = UPLOADS_MBPS.includes(Number(lerLocal("upload-v2"))) ? lerLocal("upload-v2") : "auto";
+$("sel-upload").addEventListener("change", () => { gravarLocal("upload-v2", $("sel-upload").value); ajustarQualidade(); });
 
 $("form-entrada").addEventListener("submit", (e) => { e.preventDefault(); mostrar($("erro-entrada"), false); entrar(); });
 $("btn-compartilhar").addEventListener("click", compartilhar);
@@ -1299,6 +1423,7 @@ $("btn-copiar").addEventListener("click", async () => {
 });
 window.addEventListener("beforeunload", () => { estado.saindo = true; estado.ws?.close(); });
 setInterval(verificarConexoes, 2000);
+document.addEventListener("visibilitychange", aoMudarVisibilidade);
 setInterval(medirQualidadeRecebida, 2000);
 setInterval(atualizarMedidores, 150);
 $("btn-recompartilhar").addEventListener("click", recompartilharComSom);
